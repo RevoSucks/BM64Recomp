@@ -1,0 +1,13 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "BM64Recompiled.exe",
+      "name": "BM64Recompiled.exe",
+      "currentDir": "${workspaceRoot}"
+    }
+  ]
+}
