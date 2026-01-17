@@ -14,6 +14,13 @@
 #include "ultramodern/ultramodern.hpp"
 #include "ultramodern/config.hpp"
 
+// Stubs
+
+extern "C" void __osPfsDeclearPage(uint8_t* rdram, recomp_context* ctx) {
+}
+extern "C" void __osPfsReleasePages(uint8_t* rdram, recomp_context* ctx) {
+}
+
 extern "C" void recomp_update_inputs(uint8_t* rdram, recomp_context* ctx) {
     recomp::poll_inputs();
 }

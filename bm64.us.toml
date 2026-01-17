@@ -12,11 +12,9 @@ output_func_path = "RecompiledFuncs"
 stubs = [
     "func_80297D00", # watchlo
     "func_80297D20", # watchhi, i think
-    "osMapTLB", # used for the zerojump
 ]
 
 ignored = [
-    "__osBlockSum",
     "__osPfsReleasePages",
     "__osPfsDeclearPage",
 ]
