@@ -11,5 +11,8 @@ DECLARE_FUNC(void, recomp_handle_quicksave_actions_main, OSMesgQueue* enter_mq, 
 DECLARE_FUNC(u16, recomp_get_pending_warp);
 DECLARE_FUNC(u32, recomp_get_pending_set_time);
 DECLARE_FUNC(s32, recomp_get_film_grain_enabled);
+DECLARE_FUNC(s32, osPiStartDma_recomp, OSIoMesg* mb, s32 priority, s32 direction, u32 devAddr, void* vAddr,
+             size_t nbytes, OSMesgQueue* mq);
+DECLARE_FUNC(void, yield_self_1ms, void);
 
 #endif

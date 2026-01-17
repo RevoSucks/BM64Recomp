@@ -72,3 +72,6 @@ osPfsReadWriteFile_recomp = 0x8F0000F0;
 osPfsInitPak_recomp = 0x8F0000F4;
 osPfsFileState_recomp = 0x8F0000F8;
 osPfsFreeBlocks_recomp = 0x8F0000FC;
+osPiStartDma_recomp = 0x8F000100;
+osYieldThread_recomp = 0x8F000104;
+yield_self_1ms = 0x8F000108;
