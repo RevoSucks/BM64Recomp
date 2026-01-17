@@ -19,3 +19,6 @@
 [submodule "lib/rt64"]
 	path = lib/rt64
 	url = https://github.com/rt64/rt64
+[submodule "lib/sf64"]
+	path = lib/sf64
+	url = https://github.com/sonicdcer/sf64.git
