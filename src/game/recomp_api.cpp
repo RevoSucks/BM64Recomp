@@ -215,3 +215,19 @@ extern "C" void bzero_recomp(uint8_t* rdram, recomp_context* ctx) {
         ptr[i] = 0;
     }
 }
+
+// Unimplemented stubs
+extern "C" void osMapTLB_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osCheckId_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osPfsSelectBank_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osContRamRead_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osPfsRWInode_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osContRamWrite_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osContAddressCrc_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osPfsRequestData_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osSiRawStartDma_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osViSwapContext_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osPiRawReadIo_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osGetId_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void __osSetCompare_recomp(uint8_t* rdram, recomp_context* ctx) {}
+extern "C" void osPiRawReadIo_recomp(uint8_t* rdram, recomp_context* ctx) {}

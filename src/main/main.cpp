@@ -350,10 +350,10 @@ gpr get_entrypoint_address();
 // array of supported GameEntry objects
 std::vector<recomp::GameEntry> supported_games = {
     {
-        .rom_hash = 0x35335bf69fc6515cULL,
-        .internal_name = "Quest 64",
-        .game_id = u8"quest64_us",
-        .mod_game_id = "qs64",
+        .rom_hash = 0xc4c0b74bbb696426ULL,
+        .internal_name = "BOMBERMAN64",
+        .game_id = u8"bm64_us",
+        .mod_game_id = "bm64",
         .save_type = recomp::SaveType::AllowAll,
         .is_enabled = true,
         .entrypoint_address = get_entrypoint_address(),
