@@ -81,7 +81,7 @@ extern u32 zerojump_ROM_START;
 extern u32 zerojump_ROM_END;
 
 RECOMP_PATCH void set_zero_vaddr_tlb(void) {
-    load_from_rom_to_addr(D_80042000, (u32)&zerojump_ROM_END - (u32)&zerojump_ROM_START, (u32)&zerojump_ROM_START);
+    //load_from_rom_to_addr(D_80042000, (u32)&zerojump_ROM_END - (u32)&zerojump_ROM_START, (u32)&zerojump_ROM_START);
     // Not used.
     //osMapTLB(0, 0, NULL, (u32) (((u32) (&D_80042000)) - 0x80000000), -1, -1);
     D_8001BFC0[0] = 0x80019f80; // this feels dirty hardcoding it, but whatever.

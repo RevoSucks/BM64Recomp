@@ -13,9 +13,13 @@ trace_mode = true
 stubs = [
     "func_80297D00", # watchlo
     "func_80297D20", # watchhi, i think
+    "func_80004848",
+    "osPfsReFormat",
+    "func_800046E0",
 ]
 
 ignored = [
+    "__osBlockSum",
     "__osPfsReleasePages",
     "__osPfsDeclearPage",
 ]
