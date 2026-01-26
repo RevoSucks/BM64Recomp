@@ -13,5 +13,6 @@ DECLARE_FUNC(u32, recomp_get_pending_set_time);
 DECLARE_FUNC(s32, recomp_get_film_grain_enabled);
 DECLARE_FUNC(s32, osPiStartDma_recomp, OSIoMesg *, s32, s32, u32, void *, u32, OSMesgQueue *);
 DECLARE_FUNC(void, yield_self_1ms, void);
+DECLARE_FUNC(void, execute_overlay, void);
 
 #endif
