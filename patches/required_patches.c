@@ -160,15 +160,14 @@ RECOMP_PATCH void func_8022691C(s32 arg0) {
     // We dont need to store the variable, as we are interpreting the file ID later when the overlay gets executed.
     //D_802A532C = ((OverlayCallback)0x80043000)();
 
-    /*
     switch(D_802AC5DC) {
-        case 0x00: func_ovl3_1_80043000(); return;
-        case 0x1B: func_ovl2_5_80043000(); return;
-        default: // unsupported overlay.
-            while(1)
-               ;
+        case 0x00:
+            recomp_load_overlays(0x008257F0, (void*)0x80043000, 0x00002F80);
+            return; // Copyright
+        case 0x1B:
+            recomp_load_overlays(0x0081AA10, (void*)0x80043000, 0x000068D0);
+            return; // Intro
     }
-    */
 }
 
 extern u32 D_802A1D90;
@@ -232,8 +231,12 @@ extern void func_ovl2_5_80047AF4();
 // execute overlay
 RECOMP_PATCH void func_802268F4(void) {
     switch(D_802AC5DC) {
-        case 0x00: func_ovl3_1_80044108(); return; // Copyright
-        case 0x1B: func_ovl2_5_80047AF4(); return; // Intro
+        case 0x00: 
+            func_ovl3_1_80044108();
+            return; // Copyright
+        case 0x1B: 
+            func_ovl2_5_80047AF4(); 
+            return; // Intro
         default: // unsupported overlay.
             while(1)
                ;
