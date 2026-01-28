@@ -1961,14 +1961,13 @@ scrollbarhorizontal sliderbar {
 .launcher__background-wrapper {
   display: flex;
   position: absolute;
-  top: -55vw;
-  right: -100%;
-  bottom: -50vw;
-  left: -70vw;
+  top: 0vw;
+  right: 0%;
+  bottom: 0vw;
+  left: -85vw;
   align-items: center;
   justify-content: flex-start;
   transform: translateX(0dp);
-  animation: 25s cubic-out 1 slide-mm-bg-over;
 }
 
 @keyframes fade-mm-in {
@@ -1986,8 +1985,7 @@ scrollbarhorizontal sliderbar {
   left: 0;
   width: auto;
   height: 100%;
-  animation: 2.5s cubic-in-out 1 fade-mm-in;
-  opacity: 0.15;
+  opacity: 0.5;
 }
 
 .launcher__title-quadrant {
