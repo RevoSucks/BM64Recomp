@@ -92,7 +92,7 @@ jobs:
           export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
           
           cmake -DCMAKE_BUILD_TYPE=${{ matrix.type }} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER=clang++-15 -DCMAKE_C_COMPILER=clang-15 -DCMAKE_MAKE_PROGRAM=ninja -G Ninja -S . -B cmake-build
-          cmake --build cmake-build --config ${{ matrix.type }} --target BM64Recomp -j $(nproc)
+          cmake --build cmake-build --config ${{ matrix.type }} --target BM64Recompiled -j $(nproc)
       - name: Prepare Archive
         run: |
           mv cmake-build/BM64Recomp BM64Recomp
