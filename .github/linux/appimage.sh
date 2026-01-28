@@ -18,23 +18,23 @@ curl -sSfLO "https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/raw/master/li
 chmod a+x linuxdeploy*
  
 mkdir -p AppDir/usr/bin
-cp Starfox64Recompiled AppDir/usr/bin/
+cp BM64Recompiled AppDir/usr/bin/
 cp -r assets/ AppDir/usr/bin/
 cp recompcontrollerdb.txt AppDir/usr/bin/
-cp icons/512.png AppDir/Starfox64Recompiled.png
-cp .github/linux/Starfox64Recompiled.desktop AppDir/
+cp icons/512.png AppDir/BM64Recompiled.png
+cp .github/linux/BM64Recompiled.desktop AppDir/
 
 "./linuxdeploy-$LINUX_DEPLOY_ARCH.AppImage" --appimage-extract
 mv squashfs-root/ deploy
-./deploy/AppRun --appdir=AppDir/ -d AppDir/Starfox64Recompiled.desktop -i AppDir/Starfox64Recompiled.png -e AppDir/usr/bin/Starfox64Recompiled --plugin gtk
+./deploy/AppRun --appdir=AppDir/ -d AppDir/BM64Recompiled.desktop -i AppDir/BM64Recompiled.png -e AppDir/usr/bin/BM64Recompiled --plugin gtk
 sed -i 's/exec/#exec/g' AppDir/AppRun
 echo 'if [ -f "portable.txt" ]; then' >> AppDir/AppRun
 echo '    APP_FOLDER_PATH=$PWD' >> AppDir/AppRun
 echo '    cd "$this_dir"/usr/bin/' >> AppDir/AppRun
-echo '    APP_FOLDER_PATH=$APP_FOLDER_PATH ./Starfox64Recompiled' >> AppDir/AppRun
+echo '    APP_FOLDER_PATH=$APP_FOLDER_PATH ./BM64Recompiled' >> AppDir/AppRun
 echo 'else' >> AppDir/AppRun
 echo '    cd "$this_dir"/usr/bin/' >> AppDir/AppRun
-echo '    ./Starfox64Recompiled' >> AppDir/AppRun
+echo '    ./BM64Recompiled' >> AppDir/AppRun
 echo 'fi' >> AppDir/AppRun
 
 # Remove conflicting libraries
