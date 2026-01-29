@@ -101,16 +101,16 @@ jobs:
       - name: Archive BM64Recomp
         uses: actions/upload-artifact@v4
         with:
-          name: BM64Recomp-${{ runner.os }}-X64-${{ matrix.type }}
-          path: BM64Recomp.tar.gz
+          name: BM64Recompiled-${{ runner.os }}-X64-${{ matrix.type }}
+          path: BM64Recompiled.tar.gz
       - name: Build AppImage
         run: |-
           ./.github/linux/appimage.sh 
-      - name: BM64Recomp AppImage
+      - name: BM64Recompiled AppImage
         uses: actions/upload-artifact@v4
         with:
-          name: BM64Recomp-AppImage-X64-${{ matrix.type }}
-          path: BM64Recomp-*.AppImage
+          name: BM64Recompiled-AppImage-X64-${{ matrix.type }}
+          path: BM64Recompiled-*.AppImage
   build-linux-arm64:
     runs-on: ubuntu-22.04-arm
     strategy:
