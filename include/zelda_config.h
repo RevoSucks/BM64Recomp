@@ -105,9 +105,6 @@ namespace zelda64 {
     AimInvertMode get_invert_y_axis_mode();
     void set_invert_y_axis_mode(AimInvertMode mode);
 
-    CustomBombermanMode get_custom_bomberman_mode();
-    void set_custom_bomberman_mode(CustomBombermanMode mode);
-
     void open_quit_game_prompt();
 };
 

@@ -134,10 +134,6 @@ extern "C" void recomp_get_film_grain_enabled(uint8_t* rdram, recomp_context* ct
     _return(ctx, static_cast<s32>(zelda64::get_film_grain_mode() == zelda64::FilmGrainMode::On));
 }
 
-extern "C" void recomp_get_custom_bomberman_mode(uint8_t* rdram, recomp_context* ctx) {
-    _return(ctx, static_cast<s32>(zelda64::get_custom_bomberman_mode() == zelda64::CustomBombermanMode::On));
-}
-
 extern "C" void recomp_load_overlays(uint8_t * rdram, recomp_context * ctx) {
     u32 rom = _arg<0, u32>(rdram, ctx);
     PTR(void) ram = _arg<1, PTR(void)>(rdram, ctx);
@@ -180,10 +176,6 @@ extern "C" void recomp_get_analog_inverted_axes(uint8_t* rdram, recomp_context* 
 
 extern "C" void recomp_get_invert_y_axis_mode(uint8_t* rdram, recomp_context* ctx) {
     _return<s32>(ctx, zelda64::get_invert_y_axis_mode() == zelda64::AimInvertMode::On);
-}
-
-extern "C" void recomp_custom_bomberman_in_adventure_enabled(uint8_t * rdram, recomp_context * ctx) {
-    _return(ctx, static_cast<s32>(zelda64::renderer::RT64HighPrecisionFBEnabled()));
 }
 
 extern "C" void recomp_get_camera_inputs(uint8_t* rdram, recomp_context* ctx) {

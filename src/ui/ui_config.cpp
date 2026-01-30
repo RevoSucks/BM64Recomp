@@ -240,7 +240,6 @@ struct ControlOptionsContext {
     zelda64::RadioBoxMode radio_comm_box_mode;
     zelda64::AimInvertMode invert_y_axis_mode;
     zelda64::AimInvertMode analog_camera_invert_mode;
-    zelda64::CustomBombermanMode custom_bomberman_mode;
 };
 
 ControlOptionsContext control_options_context;
@@ -321,21 +320,10 @@ zelda64::FilmGrainMode zelda64::get_film_grain_mode() {
     return control_options_context.film_grain_mode;
 }
 
-zelda64::CustomBombermanMode zelda64::get_custom_bomberman_mode() {
-    return control_options_context.custom_bomberman_mode;
-}
-
 void zelda64::set_film_grain_mode(zelda64::FilmGrainMode mode) {
     control_options_context.film_grain_mode = mode;
     if (general_model_handle) {
         general_model_handle.DirtyVariable("film_grain_mode");
-    }
-}
-
-void zelda64::set_custom_bomberman_mode(zelda64::CustomBombermanMode mode) {
-    control_options_context.custom_bomberman_mode = mode;
-    if (general_model_handle) {
-        general_model_handle.DirtyVariable("custom_bomberman_mode");
     }
 }
 
@@ -960,7 +948,6 @@ public:
         bind_option(constructor, "radio_comm_box_mode", &control_options_context.radio_comm_box_mode);
         bind_option(constructor, "invert_y_axis_mode", &control_options_context.invert_y_axis_mode);
         bind_option(constructor, "analog_camera_invert_mode", &control_options_context.analog_camera_invert_mode);
-        bind_option(constructor, "custom_bomberman_mode", &control_options_context.custom_bomberman_mode);
 
         general_model_handle = constructor.GetModelHandle();
     }

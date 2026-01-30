@@ -14,7 +14,5 @@ DECLARE_FUNC(s32, recomp_get_film_grain_enabled);
 DECLARE_FUNC(s32, osPiStartDma_recomp, OSIoMesg *, s32, s32, u32, void *, u32, OSMesgQueue *);
 DECLARE_FUNC(void, yield_self_1ms, void);
 DECLARE_FUNC(void, execute_overlay, void);
-DECLARE_FUNC(void, SpawnPlayer_PostHook, int);
-DECLARE_FUNC(s32, recomp_get_custom_bomberman_mode);
 
 #endif

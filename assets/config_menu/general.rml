@@ -116,7 +116,7 @@
                                 data-checked="invert_y_axis_mode"
                                 value="On"
                                 id="invert_y_axis_mode_on"
-                                style="nav-up: #film_grain_mode_on; nav-down:#custom_bomberman_mode_on"
+                                style="nav-up: #film_grain_mode_on"
                             />
                             <label class="config-option__tab-label" for="invert_y_axis_mode_on">On</label>
 
@@ -128,42 +128,11 @@
                                 data-checked="invert_y_axis_mode"
                                 value="Off"
                                 id="invert_y_axis_mode_off"
-                                style="nav-up: #film_grain_mode_off; nav-down:#custom_bomberman_mode_off"
+                                style="nav-up: #film_grain_mode_off"
                             />
                             <label class="config-option__tab-label" for="invert_y_axis_mode_off">Off</label>
                         </div>
                     </div>
-
-                    <!-- Custom Bomberman In Level(s) -->
-                    <div class="config-option" data-event-mouseover="set_cur_config_index(8)">
-                        <label class="config-option__title">Custom Bomberman In Level(s)</label>
-                        <div class="config-option__list">
-                            <input
-                                type="radio"
-                                data-event-blur="set_cur_config_index(-1)"
-                                data-event-focus="set_cur_config_index(8)"
-                                name="custom_bomberman_mode"
-                                data-checked="custom_bomberman_mode"
-                                value="On"
-                                id="custom_bomberman_mode_on"
-                                style="nav-up: #invert_y_axis_mode_on"
-                            />
-                            <label class="config-option__tab-label" for="custom_bomberman_mode_on">On</label>
-
-                            <input
-                                type="radio"
-                                data-event-blur="set_cur_config_index(-1)"
-                                data-event-focus="set_cur_config_index(8)"
-                                name="custom_bomberman_mode"
-                                data-checked="custom_bomberman_mode"
-                                value="Off"
-                                id="custom_bomberman_mode_off"
-                                style="nav-up: #invert_y_axis_mode_off"
-                            />
-                            <label class="config-option__tab-label" for="custom_bomberman_mode_off">Off</label>
-                        </div>
-                    </div>
-
                 </div>
 
                 <!-- Descriptions -->
