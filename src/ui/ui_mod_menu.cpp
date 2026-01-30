@@ -630,7 +630,7 @@ void ModMenu::process_event(const Event &e) {
 }
 
 ModMenu::ModMenu(Element *parent) : Element(parent) {
-    game_mod_id = "sf64";
+    game_mod_id = "bm64";
 
     ContextId context = get_current_context();
 
