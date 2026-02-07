@@ -20,7 +20,6 @@ extern Gfx D_200000[];
 extern u8 *D_802A5390;
 extern u32 D_802A5388;
 
-s32 func_802272B0(Gfx **gfx);                      /* extern */
 extern s32 D_80100000;
 extern u8 D_8014C8D0[];
 extern s32 D_8029F5E0;
@@ -115,6 +114,115 @@ extern s32 D_802A53BC;
 extern s32 D_802A53C0;
 extern s32 D_802A53C4;
 extern s32 D_802A53C8;
+
+s32 HuPrcCreate(s32*, s32, s32, s32, s32);                  /* extern */
+s32 func_802276FC(s32);                                 /* extern */
+void *func_8022A6C4(void *, s32);                        /* extern */
+struct UnkStruct802B0308_Inner *func_8026CE28(s32);                        /* extern */
+extern s32 D_802A1B50;
+
+typedef struct {
+    int Unk00;     // Offset: 0x00
+    int UnkFlags1;     // Offset: 0x04
+    int FileID;     // Offset: 0x08
+    int UnkFlags2;     // Offset: 0x0C
+    int UnkFlags3;     // Offset: 0x10
+    int UnkFlags4;     // Offset: 0x14
+    float ScrollXSpeed;     // Offset: 0x18
+    float ScrollYSpeed;     // Offset: 0x1C
+    float ScrollX;     // Offset: 0x20
+    float ScrollY;     // Offset: 0x24
+    float OffsetX;     // Offset: 0x28
+    float OffsetY;     // Offset: 0x2C
+    float ResX;     // Offset: 0x30
+    float ResY;     // Offset: 0x34
+    float ShiftX;     // Offset: 0x38
+    float ShiftY;     // Offset: 0x3C
+    float ScaleX;     // Offset: 0x40
+    float ScaleY;     // Offset: 0x44
+    float ImageWidth;     // Offset: 0x48
+    float ImageHeight;     // Offset: 0x4C
+} SkyBox;
+
+extern SkyBox D_802B0260;
+
+struct UnkStruct802B0300_Inner {
+    char pad[0x10];
+    u16 unk10;
+    u16 unk12;
+};
+
+struct UnkStruct802B0300 {
+    struct UnkStruct802B0300_Inner *unk0;
+};
+
+struct UnkStruct802B0308_Inner {
+    char pad[0xC];
+    u32 unkC;
+    f32 unk10;
+    f32 unk14;
+    f32 unk18;
+    f32 unk1C;
+    f32 unk20;
+    f32 unk24;
+};
+
+struct UnkStruct802B0308 {
+    struct UnkStruct802B0308_Inner *unk0;
+};
+
+extern struct UnkStruct802B0300 D_802B0300[];
+extern struct UnkStruct802B0308 D_802B0308[];
+
+extern void func_80287904();
+
+RECOMP_EXPORT void recomp_enable_rects_extended(Gfx **gfx) {
+    recomp_printf("(E) Master Display List: 0x%08X\n", gMasterDisplayList);
+    gEXSetRectAspect((*gfx++), G_EX_ASPECT_STRETCH);
+}
+
+RECOMP_EXPORT void recomp_disable_rects_extended(Gfx **gfx) {
+    recomp_printf("(D) Master Display List: 0x%08X\n", gMasterDisplayList);
+    gEXSetRectAspect((*gfx++), G_EX_ASPECT_AUTO);
+}
+
+// init_skybox
+RECOMP_PATCH SkyBox* func_80287DC0(s32 fileID) {
+    SkyBox* skybox = &D_802B0260;
+    s32 i;
+
+    for(i = 0; i < 2; i++) {
+        // find a non-used skybox to init in.
+        if (skybox->UnkFlags1 == 0) {
+            recomp_printf("Skybox File ID being processed: %d\n", fileID);
+            skybox->Unk00 = i;
+            skybox->FileID = fileID;
+            skybox->UnkFlags1 = (s32) (skybox->UnkFlags1 | 0x80000000);
+            skybox->UnkFlags2 = 0x400;
+            skybox->UnkFlags3 = 0x40;
+            D_802B0300[skybox->Unk00].unk0 = func_8026CE28(fileID);
+            D_802B0308[skybox->Unk00].unk0 = func_8022A6C4(D_802B0300[skybox->Unk00].unk0, skybox->UnkFlags3);
+            skybox->UnkFlags2 |= D_802B0308[skybox->Unk00].unk0->unkC;
+            recomp_printf("Skybox Width: 0x%08X\n", D_802B0300[skybox->Unk00].unk0->unk10);
+            skybox->ImageWidth = D_802B0300[skybox->Unk00].unk0->unk10;
+            recomp_printf("Skybox Height: 0x%08X\n", D_802B0300[skybox->Unk00].unk0->unk12);
+            skybox->ImageHeight = D_802B0300[skybox->Unk00].unk0->unk12;
+            D_802B0308[skybox->Unk00].unk0->unk10 = skybox->OffsetX;
+            D_802B0308[skybox->Unk00].unk0->unk14 = skybox->OffsetY;
+            D_802B0308[skybox->Unk00].unk0->unk18 = skybox->ResX;
+            D_802B0308[skybox->Unk00].unk0->unk1C = skybox->ResY;
+            D_802B0308[skybox->Unk00].unk0->unk20 = 0;
+            D_802B0308[skybox->Unk00].unk0->unk24 = 0;
+            if (D_802A1B50 == -1) {
+                D_802A1B50 = HuPrcCreate(&func_80287904, 0, 0, 0, 0x403);
+                func_802276FC(0);
+            }
+            return skybox;
+        }
+        skybox++;
+    }
+    return NULL;
+}
 
 // 8, 6, 304, 228
 RECOMP_PATCH void func_80227708(s32 arg0, s32 arg1, s32 arg2, s32 arg3) {
@@ -831,11 +939,15 @@ extern s32 D_8029F5F8;
 extern s32 D_802A5368;
 extern Gfx* gMasterDisplayList; // D_802A5390
 
+void func_802272B0(Gfx** gfxP);
+
 RECOMP_PATCH Gfx *func_80227464(void) {
     D_802A5388 = D_8029F5E0;
     D_802A538C = &D_8014C8D0[D_802A5388 * 0x27000];
     gMasterDisplayList = (Gfx *)((u8*)(D_802A538C) + 0x24000);
     D_802A5368 = 0;
+
+    gEXEnable(gMasterDisplayList++);
 
     gSPSegment(gMasterDisplayList++, 0x00, 0x00000000);
     gSPSegment(gMasterDisplayList++, 0x01, (void* ) (((u32)D_802A5388 * 0x25800) + 0x80000000 + (u8*)&D_80100000));
@@ -853,4 +965,52 @@ RECOMP_PATCH Gfx *func_80227464(void) {
     gSPSetGeometryMode(gMasterDisplayList++, G_ZBUFFER | G_CULL_BACK | G_LIGHTING);
     gDPSetRenderMode(gMasterDisplayList++, G_RM_AA_ZB_TEX_EDGE, G_RM_AA_ZB_TEX_EDGE2);
     return gMasterDisplayList;
+}
+
+extern u8 D_1000000[];
+extern u8 D_8029F7A0[];
+
+extern s32 D_802A53C0;
+extern s32 D_802A53C4;
+extern s32 D_802A53C8;
+extern s32 D_802A53CC;
+
+extern s32 D_8029F5E4;
+
+extern s32 D_8029F5EC; // r
+extern s32 D_8029F5F0; // g
+extern s32 D_8029F5F4; // b
+
+extern s32 D_802A53C4;
+extern s32 D_802A53C8;
+
+extern s32 D_802A53BC;
+
+/*
+RECOMP_PATCH void func_802272B0(Gfx** gfxP) {
+    Gfx *gfx = *gfxP;
+
+    gSPDisplayList(gfx++, D_8029F7A0);
+    gDPFillRectangle(gfx++, D_802A53BC, D_802A53C0, D_802A53C4 - 1, D_802A53C8 - 1);
+    gDPPipeSync(gfx++);
+    gDPSetColorImage(gfx++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 424, D_1000000);
+    if (D_8029F5E4 != 0) {
+        gDPSetFillColor(gfx++, (GPACK_RGBA5551(D_8029F5EC, D_8029F5F0, D_8029F5F4, 1) << 0x10) | GPACK_RGBA5551(D_8029F5EC, D_8029F5F0, D_8029F5F4, 1));
+        gDPFillRectangle(gfx++, D_802A53BC, D_802A53C0, D_802A53C4 - 1, D_802A53C8 - 1);
+        gDPPipeSync(gfx++);
+    }
+    gDPSetCycleType(gfx++, G_CYC_1CYCLE);
+    *gfxP = gfx;
+}
+*/
+
+extern s32 D_8029F5EC;
+extern s32 D_8029F5F0;
+extern s32 D_8029F5F4;
+
+// set color
+RECOMP_PATCH void func_802276E0(s32 arg0, s32 arg1, s32 arg2) {
+    D_8029F5EC = arg0;
+    D_8029F5F0 = arg1;
+    D_8029F5F4 = arg2;
 }

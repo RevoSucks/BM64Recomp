@@ -22,7 +22,7 @@ static constexpr size_t MAX_PROCESSES = 0x50;
 static constexpr size_t MIN_NATIVE_STACK = 0x80000;  // 512KB
 
 // Enable debug logging
-#define PROCESS_DEBUG
+//#define PROCESS_DEBUG
 
 // ============================================================================
 // Yield reasons (must match MIPS side in process_funcs.h)
