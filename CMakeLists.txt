@@ -23,6 +23,20 @@ endif()
 
 if (APPLE)
     enable_language(OBJC OBJCXX)
+
+    execute_process(
+        COMMAND /usr/bin/python3 -c "import macholib"
+        RESULT_VARIABLE MACHOLIB_IMPORT_RESULT
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+    if (NOT MACHOLIB_IMPORT_RESULT EQUAL 0)
+        message(WARNING
+            "Python package 'macholib' was not found for /usr/bin/python3. "
+            "The custom macOS linker wrapper at .github/macos/ld64 will fail at link time without it. "
+            "Install it with: python3 -m pip install --user macholib"
+        )
+    endif()
 endif()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
@@ -113,12 +127,43 @@ set_source_files_properties(${CMAKE_SOURCE_DIR}/RecompiledPatches/patches.c PROP
 
 # Build patches elf
 if(NOT DEFINED PATCHES_C_COMPILER)
-    set(PATCHES_C_COMPILER clang)
+    if (APPLE)
+        if (EXISTS "/opt/local/bin/clang-mp-18")
+            set(PATCHES_C_COMPILER "/opt/local/bin/clang-mp-18")
+        elseif (EXISTS "/opt/homebrew/opt/llvm/bin/clang")
+            set(PATCHES_C_COMPILER "/opt/homebrew/opt/llvm/bin/clang")
+        elseif (EXISTS "/usr/local/opt/llvm/bin/clang")
+            set(PATCHES_C_COMPILER "/usr/local/opt/llvm/bin/clang")
+        else()
+            set(PATCHES_C_COMPILER clang)
+        endif()
+    else()
+        set(PATCHES_C_COMPILER clang)
+    endif()
 endif()
 
 if(NOT DEFINED PATCHES_LD)
-    set(PATCHES_LD ld.lld)
+    if (APPLE)
+        if (EXISTS "/opt/local/bin/ld.lld-mp-18")
+            set(PATCHES_LD "/opt/local/bin/ld.lld-mp-18")
+        elseif (EXISTS "/opt/homebrew/opt/lld/bin/ld.lld")
+            set(PATCHES_LD "/opt/homebrew/opt/lld/bin/ld.lld")
+        elseif (EXISTS "/opt/homebrew/opt/llvm/bin/ld.lld")
+            set(PATCHES_LD "/opt/homebrew/opt/llvm/bin/ld.lld")
+        elseif (EXISTS "/usr/local/opt/lld/bin/ld.lld")
+            set(PATCHES_LD "/usr/local/opt/lld/bin/ld.lld")
+        elseif (EXISTS "/usr/local/opt/llvm/bin/ld.lld")
+            set(PATCHES_LD "/usr/local/opt/llvm/bin/ld.lld")
+        else()
+            set(PATCHES_LD ld.lld)
+        endif()
+    else()
+        set(PATCHES_LD ld.lld)
+    endif()
 endif()
+
+message(STATUS "PATCHES_C_COMPILER = ${PATCHES_C_COMPILER}")
+message(STATUS "PATCHES_LD = ${PATCHES_LD}")
 
 add_custom_target(PatchesBin
     COMMAND ${CMAKE_COMMAND} -E env CC=${PATCHES_C_COMPILER} LD=${PATCHES_LD} make
