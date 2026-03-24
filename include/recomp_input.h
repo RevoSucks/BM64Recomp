@@ -84,6 +84,25 @@ namespace recomp {
         COUNT
     };
 
+    enum class ControllerPortMode {
+        Off,
+        Keyboard,
+        Controller,
+        OptionCount
+    };
+
+    NLOHMANN_JSON_SERIALIZE_ENUM(recomp::ControllerPortMode, {
+        {recomp::ControllerPortMode::Off, "Off"},
+        {recomp::ControllerPortMode::Keyboard, "Keyboard"},
+        {recomp::ControllerPortMode::Controller, "Controller"}
+    });
+
+    constexpr int max_ports = 4;
+
+    ControllerPortMode get_port_mode(int port);
+    void set_port_mode(int port, ControllerPortMode mode);
+    int get_port_count();
+
     void start_scanning_input(InputDevice device);
     void stop_scanning_input();
     void finish_scanning_input(InputField scanned_field);
@@ -150,6 +169,7 @@ namespace recomp {
 
     extern const DefaultN64Mappings default_n64_keyboard_mappings;
     extern const DefaultN64Mappings default_n64_controller_mappings;
+    const DefaultN64Mappings& get_default_keyboard_mappings_for_port(int port);
 
     constexpr size_t bindings_per_input = 2;
 
@@ -158,7 +178,9 @@ namespace recomp {
     const std::string& get_input_enum_name(GameInput input);
     GameInput get_input_from_enum_name(const std::string_view name);
     InputField& get_input_binding(GameInput input, size_t binding_index, InputDevice device);
+    InputField& get_input_binding(GameInput input, size_t binding_index, InputDevice device, int port);
     void set_input_binding(GameInput input, size_t binding_index, InputDevice device, InputField value);
+    void set_input_binding(GameInput input, size_t binding_index, InputDevice device, InputField value, int port);
 
     bool get_n64_input(int controller_num, uint16_t* buttons_out, float* x_out, float* y_out);
     void set_rumble(int controller_num, bool);

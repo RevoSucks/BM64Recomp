@@ -23,6 +23,28 @@ struct ControllerState {
     };
 };
 
+// Per-port mode state
+static std::array<recomp::ControllerPortMode, recomp::max_ports> port_modes = {
+    recomp::ControllerPortMode::Keyboard,
+    recomp::ControllerPortMode::Off,
+    recomp::ControllerPortMode::Off,
+    recomp::ControllerPortMode::Off,
+};
+
+recomp::ControllerPortMode recomp::get_port_mode(int port) {
+    if (port < 0 || port >= recomp::max_ports) return recomp::ControllerPortMode::Off;
+    return port_modes[port];
+}
+
+void recomp::set_port_mode(int port, recomp::ControllerPortMode mode) {
+    if (port < 0 || port >= recomp::max_ports) return;
+    port_modes[port] = mode;
+}
+
+int recomp::get_port_count() {
+    return recomp::max_ports;
+}
+
 static struct {
     const Uint8* keys = nullptr;
     SDL_Keymod keymod = SDL_Keymod::KMOD_NONE;
