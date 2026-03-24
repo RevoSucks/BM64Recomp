@@ -3,6 +3,72 @@
     </head>
     <body>
         <form class="config__form" data-attr-cur-input="cur_input_row" data-attr-cur-binding-slot="active_binding_slot">
+            <!-- Port selector -->
+            <div class="config__header" style="justify-content: center; gap: 8dp; margin-bottom: 4dp;">
+                <button
+                    class="button"
+                    data-class-button--success="selected_port == 0"
+                    data-event-click="select_port(0)"
+                    style="min-width: 48dp;"
+                >
+                    <div class="button__label">P1</div>
+                </button>
+                <button
+                    class="button"
+                    data-class-button--success="selected_port == 1"
+                    data-event-click="select_port(1)"
+                    style="min-width: 48dp;"
+                >
+                    <div class="button__label">P2</div>
+                </button>
+                <button
+                    class="button"
+                    data-class-button--success="selected_port == 2"
+                    data-event-click="select_port(2)"
+                    style="min-width: 48dp;"
+                >
+                    <div class="button__label">P3</div>
+                </button>
+                <button
+                    class="button"
+                    data-class-button--success="selected_port == 3"
+                    data-event-click="select_port(3)"
+                    style="min-width: 48dp;"
+                >
+                    <div class="button__label">P4</div>
+                </button>
+            </div>
+            <!-- Port mode selector -->
+            <div class="config__header" style="justify-content: center; gap: 8dp; margin-bottom: 4dp;">
+                <button
+                    class="button"
+                    data-class-button--error="port_mode == 'Off'"
+                    data-event-click="set_port_mode('Off')"
+                    style="min-width: 64dp;"
+                >
+                    <div class="button__label">Off</div>
+                </button>
+                <button
+                    class="button"
+                    data-class-button--success="port_mode == 'Keyboard'"
+                    data-event-click="set_port_mode('Keyboard')"
+                    style="min-width: 80dp;"
+                >
+                    <div class="button__label">Keyboard</div>
+                </button>
+                <button
+                    class="button"
+                    data-class-button--success="port_mode == 'Controller'"
+                    data-event-click="set_port_mode('Controller')"
+                    style="min-width: 80dp;"
+                >
+                    <div class="button__label">Controller</div>
+                </button>
+                <label
+                    data-if="port_mode == 'Controller'"
+                    style="margin-left: 8dp; color: #aaa; font-size: 14dp;"
+                >{{assigned_controller_name}}</label>
+            </div>
             <div class="config__header">
                 <div class="config__header-left">
                     <button

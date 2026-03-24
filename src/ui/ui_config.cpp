@@ -95,6 +95,7 @@ static int scanned_binding_index = -1;
 static int scanned_input_index = -1;
 static int focused_input_index = -1;
 static int focused_config_option_index = -1;
+static int selected_port = 0;
 
 static bool msaa2x_supported = false;
 static bool msaa4x_supported = false;
@@ -110,7 +111,7 @@ int recomp::get_scanned_input_index() {
 }
 
 void recomp::finish_scanning_input(recomp::InputField scanned_field) {
-    recomp::set_input_binding(static_cast<recomp::GameInput>(scanned_input_index), scanned_binding_index, cur_device, scanned_field);
+    recomp::set_input_binding(static_cast<recomp::GameInput>(scanned_input_index), scanned_binding_index, cur_device, scanned_field, selected_port);
     scanned_input_index = -1;
     scanned_binding_index = -1;
     controls_model_handle.DirtyVariable("inputs");
@@ -758,9 +759,9 @@ public:
         constructor.BindEventCallback("reset_input_bindings_to_defaults",
             [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
                 if (cur_device == recomp::InputDevice::Controller) {
-                    zelda64::reset_cont_input_bindings();
+                    zelda64::reset_cont_input_bindings(selected_port);
                 } else {
-                    zelda64::reset_kb_input_bindings();
+                    zelda64::reset_kb_input_bindings(selected_port);
                 }
                 model_handle.DirtyAllVariables();
                 nav_help_model_handle.DirtyVariable("nav_help__accept");
@@ -772,7 +773,7 @@ public:
             [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
                 recomp::GameInput input = static_cast<recomp::GameInput>(inputs.at(0).Get<size_t>());
                 for (size_t binding_index = 0; binding_index < recomp::bindings_per_input; binding_index++) {
-                    recomp::set_input_binding(input, binding_index, cur_device, recomp::InputField{});
+                    recomp::set_input_binding(input, binding_index, cur_device, recomp::InputField{}, selected_port);
                 }
                 model_handle.DirtyVariable("inputs");
                 graphics_model_handle.DirtyVariable("gfx_help__apply");
@@ -781,10 +782,30 @@ public:
         constructor.BindEventCallback("reset_single_input_binding_to_default",
             [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
                 recomp::GameInput input = static_cast<recomp::GameInput>(inputs.at(0).Get<size_t>());
-                zelda64::reset_single_input_binding(cur_device, input);
+                zelda64::reset_single_input_binding(cur_device, input, selected_port);
                 model_handle.DirtyVariable("inputs");
                 nav_help_model_handle.DirtyVariable("nav_help__accept");
                 nav_help_model_handle.DirtyVariable("nav_help__exit");
+            });
+
+        constructor.BindEventCallback("select_port",
+            [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
+                selected_port = inputs.at(0).Get<int>();
+                model_handle.DirtyVariable("selected_port");
+                model_handle.DirtyVariable("port_mode");
+                model_handle.DirtyVariable("assigned_controller_name");
+                model_handle.DirtyVariable("inputs");
+            });
+
+        constructor.BindEventCallback("set_port_mode",
+            [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
+                std::string mode_str = inputs.at(0).Get<std::string>();
+                recomp::ControllerPortMode mode = recomp::ControllerPortMode::Off;
+                if (mode_str == "Keyboard") mode = recomp::ControllerPortMode::Keyboard;
+                else if (mode_str == "Controller") mode = recomp::ControllerPortMode::Controller;
+                recomp::set_port_mode(selected_port, mode);
+                model_handle.DirtyVariable("port_mode");
+                model_handle.DirtyVariable("assigned_controller_name");
             });
 
         constructor.BindEventCallback("set_input_row_focus",
@@ -818,7 +839,7 @@ public:
             virtual int Size(void* ptr) override { return recomp::bindings_per_input; }
             virtual Rml::DataVariable Child(void* ptr, const Rml::DataAddressEntry& address) override {
                 recomp::GameInput input = static_cast<recomp::GameInput>((uintptr_t)ptr);
-                return Rml::DataVariable{&input_field_definition_instance, &recomp::get_input_binding(input, address.index, cur_device)};
+                return Rml::DataVariable{&input_field_definition_instance, &recomp::get_input_binding(input, address.index, cur_device, selected_port)};
             }
         };
         // Static instance of the InputField array variable definition to have a fixed pointer to return to RmlUi.
@@ -889,6 +910,21 @@ public:
         });
 
         constructor.Bind<int>("active_binding_slot", &scanned_binding_index);
+        constructor.Bind<int>("selected_port", &selected_port);
+
+        constructor.BindFunc("port_mode", [](Rml::Variant& out) {
+            recomp::ControllerPortMode mode = recomp::get_port_mode(selected_port);
+            switch (mode) {
+                case recomp::ControllerPortMode::Off: out = "Off"; break;
+                case recomp::ControllerPortMode::Keyboard: out = "Keyboard"; break;
+                case recomp::ControllerPortMode::Controller: out = "Controller"; break;
+                default: out = "Off"; break;
+            }
+        });
+
+        constructor.BindFunc("assigned_controller_name", [](Rml::Variant& out) {
+            out = recomp::get_port_controller_name(selected_port);
+        });
 
         controls_model_handle = constructor.GetModelHandle();
     }
