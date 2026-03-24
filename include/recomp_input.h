@@ -188,7 +188,8 @@ namespace recomp {
     void handle_events();
 
     ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num);
-    
+    std::string get_port_controller_name(int port);
+
     // Rumble strength ranges from 0 to 100.
     int get_rumble_strength();
     void set_rumble_strength(int strength);

@@ -53,15 +53,20 @@ static struct {
     std::mutex cur_controllers_mutex;
     std::vector<SDL_GameController*> cur_controllers{};
     std::unordered_map<SDL_JoystickID, ControllerState> controller_states;
-    
+
+    // Per-port controller assignment
+    std::array<SDL_JoystickID, recomp::max_ports> port_controller_ids = {-1, -1, -1, -1};
+    std::array<SDL_GameController*, recomp::max_ports> port_controllers = {nullptr, nullptr, nullptr, nullptr};
+
     std::array<float, 2> rotation_delta{};
     std::array<float, 2> mouse_delta{};
     std::mutex pending_input_mutex;
     std::array<float, 2> pending_rotation_delta{};
     std::array<float, 2> pending_mouse_delta{};
 
-    float cur_rumble;
-    bool rumble_active;
+    // Per-port rumble state
+    std::array<float, recomp::max_ports> cur_rumble = {0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<bool, recomp::max_ports> rumble_active = {false, false, false, false};
 } InputState;
 
 static struct {
@@ -158,13 +163,24 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
             SDL_GameController* controller = SDL_GameControllerOpen(controller_event->which);
             printf("Controller added: %d\n", controller_event->which);
             if (controller != nullptr) {
-                printf("  Instance ID: %d\n", SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller)));
-                ControllerState& state = InputState.controller_states[SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller))];
+                SDL_JoystickID instance_id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
+                printf("  Instance ID: %d\n", instance_id);
+                ControllerState& state = InputState.controller_states[instance_id];
                 state.controller = controller;
 
                 if (SDL_GameControllerHasSensor(controller, SDL_SensorType::SDL_SENSOR_GYRO) && SDL_GameControllerHasSensor(controller, SDL_SensorType::SDL_SENSOR_ACCEL)) {
                     SDL_GameControllerSetSensorEnabled(controller, SDL_SensorType::SDL_SENSOR_GYRO, SDL_TRUE);
                     SDL_GameControllerSetSensorEnabled(controller, SDL_SensorType::SDL_SENSOR_ACCEL, SDL_TRUE);
+                }
+
+                // Assign to first port with mode=Controller and no assignment
+                for (int p = 0; p < recomp::max_ports; p++) {
+                    if (port_modes[p] == recomp::ControllerPortMode::Controller && InputState.port_controllers[p] == nullptr) {
+                        InputState.port_controller_ids[p] = instance_id;
+                        InputState.port_controllers[p] = controller;
+                        printf("  Assigned to port %d\n", p);
+                        break;
+                    }
                 }
             }
         }
@@ -173,6 +189,17 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
         {
             SDL_ControllerDeviceEvent* controller_event = &event->cdevice;
             printf("Controller removed: %d\n", controller_event->which);
+
+            // Clear port assignment for this controller
+            for (int p = 0; p < recomp::max_ports; p++) {
+                if (InputState.port_controller_ids[p] == controller_event->which) {
+                    InputState.port_controller_ids[p] = -1;
+                    InputState.port_controllers[p] = nullptr;
+                    printf("  Cleared port %d assignment\n", p);
+                    break;
+                }
+            }
+
             InputState.controller_states.erase(controller_event->which);
         }
         break;
@@ -485,6 +512,71 @@ const recomp::DefaultN64Mappings recomp::default_n64_controller_mappings = {
     }
 };
 
+// Port 1 default keyboard mappings: arrow keys + nearby keys
+const recomp::DefaultN64Mappings default_n64_keyboard_mappings_p2 = {
+    .a = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_RSHIFT}
+    },
+    .b = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_RCTRL}
+    },
+    .l = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_PAGEUP}
+    },
+    .r = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_PAGEDOWN}
+    },
+    .z = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_RALT}
+    },
+    .start = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_KP_ENTER}
+    },
+    .c_left = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_KP_4}
+    },
+    .c_right = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_KP_6}
+    },
+    .c_up = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_KP_8}
+    },
+    .c_down = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_KP_2}
+    },
+    .dpad_left = {},
+    .dpad_right = {},
+    .dpad_up = {},
+    .dpad_down = {},
+    .analog_left = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_LEFT}
+    },
+    .analog_right = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_RIGHT}
+    },
+    .analog_up = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_UP}
+    },
+    .analog_down = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_DOWN}
+    },
+    .toggle_menu = {},
+    .accept_menu = {},
+    .apply_menu = {}
+};
+
+const recomp::DefaultN64Mappings& recomp::get_default_keyboard_mappings_for_port(int port) {
+    switch (port) {
+        case 0: return recomp::default_n64_keyboard_mappings;
+        case 1: return default_n64_keyboard_mappings_p2;
+        default: {
+            // Ports 2-3: empty defaults
+            static const recomp::DefaultN64Mappings empty{};
+            return empty;
+        }
+    }
+}
+
 void recomp::poll_inputs() {
     InputState.keys = SDL_GetKeyboardState(&InputState.numkeys);
     InputState.keymod = SDL_GetModState();
@@ -533,24 +625,35 @@ void recomp::poll_inputs() {
 }
 
 void recomp::set_rumble(int controller_num, bool on) {
-    if (controller_num == 0) {
-        InputState.rumble_active = on;
+    if (controller_num >= 0 && controller_num < recomp::max_ports) {
+        InputState.rumble_active[controller_num] = on;
     }
 }
 
 ultramodern::input::connected_device_info_t recomp::get_connected_device_info(int controller_num) {
-    switch (controller_num) {
-        case 0:
+    if (controller_num >= 0 && controller_num < recomp::max_ports) {
+        if (port_modes[controller_num] != recomp::ControllerPortMode::Off) {
             return ultramodern::input::connected_device_info_t {
                 .connected_device = ultramodern::input::Device::Controller,
                 .connected_pak = ultramodern::input::Pak::RumblePak,
             };
+        }
     }
 
     return ultramodern::input::connected_device_info_t {
         .connected_device = ultramodern::input::Device::None,
         .connected_pak = ultramodern::input::Pak::None,
     };
+}
+
+std::string recomp::get_port_controller_name(int port) {
+    if (port >= 0 && port < recomp::max_ports && InputState.port_controllers[port] != nullptr) {
+        const char* name = SDL_GameControllerName(InputState.port_controllers[port]);
+        if (name != nullptr) {
+            return std::string(name);
+        }
+    }
+    return "None";
 }
 
 static float smoothstep(float from, float to, float amount) {
@@ -561,21 +664,22 @@ static float smoothstep(float from, float to, float amount) {
 // Update rumble to attempt to mimic the way n64 rumble ramps up and falls off
 void recomp::update_rumble() {
     // Note: values are not accurate! just approximations based on feel
-    if (InputState.rumble_active) {
-        InputState.cur_rumble += 0.17f;
-        if (InputState.cur_rumble > 1) InputState.cur_rumble = 1;
-    } else {
-        InputState.cur_rumble *= 0.92f;
-        InputState.cur_rumble -= 0.01f;
-        if (InputState.cur_rumble < 0) InputState.cur_rumble = 0;
-    }
-    float smooth_rumble = smoothstep(0, 1, InputState.cur_rumble);
-
-    uint16_t rumble_strength = smooth_rumble * (recomp::get_rumble_strength() * 0xFFFF / 100);
     uint32_t duration = 1000000; // Dummy duration value that lasts long enough to matter as the game will reset rumble on its own.
-    {
-        std::lock_guard lock{ InputState.cur_controllers_mutex };
-        for (const auto& controller : InputState.cur_controllers) {
+    for (int p = 0; p < recomp::max_ports; p++) {
+        if (InputState.rumble_active[p]) {
+            InputState.cur_rumble[p] += 0.17f;
+            if (InputState.cur_rumble[p] > 1) InputState.cur_rumble[p] = 1;
+        } else {
+            InputState.cur_rumble[p] *= 0.92f;
+            InputState.cur_rumble[p] -= 0.01f;
+            if (InputState.cur_rumble[p] < 0) InputState.cur_rumble[p] = 0;
+        }
+        float smooth_rumble = smoothstep(0, 1, InputState.cur_rumble[p]);
+        uint16_t rumble_strength = smooth_rumble * (recomp::get_rumble_strength() * 0xFFFF / 100);
+
+        // Apply rumble only to the assigned controller for this port
+        SDL_GameController* controller = InputState.port_controllers[p];
+        if (controller != nullptr) {
             SDL_GameControllerRumble(controller, 0, rumble_strength, duration);
         }
     }
