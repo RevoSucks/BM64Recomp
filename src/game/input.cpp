@@ -701,6 +701,18 @@ bool controller_button_state(int32_t input_id) {
     return false;
 }
 
+// Per-port version: reads only the assigned gamepad for the given port
+bool controller_button_state_port(int32_t input_id, int port) {
+    if (input_id >= 0 && input_id < SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_MAX) {
+        SDL_GameControllerButton button = (SDL_GameControllerButton)input_id;
+        SDL_GameController* controller = InputState.port_controllers[port];
+        if (controller != nullptr) {
+            return SDL_GameControllerGetButton(controller, button) != 0;
+        }
+    }
+    return false;
+}
+
 static std::atomic_bool right_analog_suppressed = false;
 
 float controller_axis_state(int32_t input_id, bool allow_suppression) {
@@ -727,6 +739,32 @@ float controller_axis_state(int32_t input_id, bool allow_suppression) {
         }
 
         return std::clamp(ret, 0.0f, 1.0f);
+    }
+    return false;
+}
+
+// Per-port version: reads only the assigned gamepad for the given port
+float controller_axis_state_port(int32_t input_id, bool allow_suppression, int port) {
+    if (abs(input_id) - 1 < SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_MAX) {
+        SDL_GameControllerAxis axis = (SDL_GameControllerAxis)(abs(input_id) - 1);
+        bool negative_range = input_id < 0;
+        float ret = 0.0f;
+
+        SDL_GameController* controller = InputState.port_controllers[port];
+        if (controller != nullptr) {
+            float cur_val = SDL_GameControllerGetAxis(controller, axis) * (1/32768.0f);
+            if (negative_range) {
+                cur_val = -cur_val;
+            }
+
+            if (allow_suppression && right_analog_suppressed.load() &&
+                (axis == SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_RIGHTX || axis == SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_RIGHTY)) {
+                cur_val = 0;
+            }
+            ret = std::clamp(cur_val, 0.0f, 1.0f);
+        }
+
+        return ret;
     }
     return false;
 }
@@ -788,6 +826,65 @@ bool recomp::get_input_digital(const std::span<const recomp::InputField> fields)
     bool ret = 0;
     for (const auto& field : fields) {
         ret |= get_input_digital(field);
+    }
+    return ret;
+}
+
+// Per-port versions: for controller inputs, read only from the port's assigned gamepad
+float recomp::get_input_analog_port(const recomp::InputField& field, int port) {
+    switch ((InputType)field.input_type) {
+    case InputType::Keyboard:
+        if (InputState.keys && field.input_id >= 0 && field.input_id < InputState.numkeys) {
+            if (should_override_keystate(static_cast<SDL_Scancode>(field.input_id), InputState.keymod)) {
+                return 0.0f;
+            }
+            return InputState.keys[field.input_id] ? 1.0f : 0.0f;
+        }
+        return 0.0f;
+    case InputType::ControllerDigital:
+        return controller_button_state_port(field.input_id, port) ? 1.0f : 0.0f;
+    case InputType::ControllerAnalog:
+        return controller_axis_state_port(field.input_id, true, port);
+    case InputType::Mouse:
+        return 0.0f;
+    case InputType::None:
+        return false;
+    }
+}
+
+float recomp::get_input_analog_port(const std::span<const recomp::InputField> fields, int port) {
+    float ret = 0.0f;
+    for (const auto& field : fields) {
+        ret += get_input_analog_port(field, port);
+    }
+    return std::clamp(ret, 0.0f, 1.0f);
+}
+
+bool recomp::get_input_digital_port(const recomp::InputField& field, int port) {
+    switch ((InputType)field.input_type) {
+    case InputType::Keyboard:
+        if (InputState.keys && field.input_id >= 0 && field.input_id < InputState.numkeys) {
+            if (should_override_keystate(static_cast<SDL_Scancode>(field.input_id), InputState.keymod)) {
+                return false;
+            }
+            return InputState.keys[field.input_id] != 0;
+        }
+        return false;
+    case InputType::ControllerDigital:
+        return controller_button_state_port(field.input_id, port);
+    case InputType::ControllerAnalog:
+        return controller_axis_state_port(field.input_id, true, port) >= axis_threshold;
+    case InputType::Mouse:
+        return false;
+    case InputType::None:
+        return false;
+    }
+}
+
+bool recomp::get_input_digital_port(const std::span<const recomp::InputField> fields, int port) {
+    bool ret = 0;
+    for (const auto& field : fields) {
+        ret |= get_input_digital_port(field, port);
     }
     return ret;
 }

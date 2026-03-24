@@ -74,6 +74,11 @@ namespace recomp {
     float get_input_analog(const std::span<const recomp::InputField> fields);
     bool get_input_digital(const InputField& field);
     bool get_input_digital(const std::span<const recomp::InputField> fields);
+    // Per-port versions: for controller inputs, read only from the port's assigned gamepad
+    float get_input_analog_port(const InputField& field, int port);
+    float get_input_analog_port(const std::span<const recomp::InputField> fields, int port);
+    bool get_input_digital_port(const InputField& field, int port);
+    bool get_input_digital_port(const std::span<const recomp::InputField> fields, int port);
     void get_gyro_deltas(float* x, float* y);
     void get_mouse_deltas(float* x, float* y);
     void get_right_analog(float* x, float* y);
