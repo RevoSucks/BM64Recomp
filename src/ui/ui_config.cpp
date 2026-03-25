@@ -97,6 +97,7 @@ static int focused_input_index = -1;
 static int focused_config_option_index = -1;
 static int selected_port = 0;
 static int port_mode_index = 0; // 0=Off, 1=Keyboard, 2=Controller
+static int port_pak_type_index = 0; // 0=ControllerPak, 1=RumblePak
 static int port_controller_index = -1;
 static std::vector<std::string> connected_controller_names;
 
@@ -788,6 +789,10 @@ public:
                 selected_port = 0;
                 cur_device = recomp::InputDevice::Keyboard;
                 port_mode_index = static_cast<int>(recomp::ControllerPortMode::Keyboard);
+                port_pak_type_index = static_cast<int>(recomp::PakType::ControllerPak);
+                for (int p = 0; p < recomp::max_ports; p++) {
+                    recomp::set_port_pak_type(p, recomp::PakType::ControllerPak);
+                }
                 refresh_controller_list();
                 zelda64::save_config();
                 model_handle.DirtyAllVariables();
@@ -820,6 +825,7 @@ public:
                 selected_port = inputs.at(0).Get<int>();
                 recomp::ControllerPortMode mode = recomp::get_port_mode(selected_port);
                 port_mode_index = static_cast<int>(mode);
+                port_pak_type_index = static_cast<int>(recomp::get_port_pak_type(selected_port));
                 // Sync cur_device with the selected port's mode
                 if (mode == recomp::ControllerPortMode::Controller) {
                     cur_device = recomp::InputDevice::Controller;
@@ -960,6 +966,7 @@ public:
         constructor.Bind<int>("active_binding_slot", &scanned_binding_index);
         constructor.Bind<int>("selected_port", &selected_port);
         constructor.Bind<int>("port_mode_index", &port_mode_index);
+        constructor.Bind<int>("port_pak_type_index", &port_pak_type_index);
         constructor.Bind<int>("port_controller_index", &port_controller_index);
         constructor.RegisterArray<std::vector<std::string>>();
         constructor.Bind("connected_controller_names", &connected_controller_names);
@@ -973,6 +980,27 @@ public:
                 default: out = "Off"; break;
             }
         });
+
+        constructor.BindFunc("pak_type", [](Rml::Variant& out) {
+            recomp::PakType type = recomp::get_port_pak_type(selected_port);
+            switch (type) {
+                case recomp::PakType::ControllerPak: out = "Controller Pak"; break;
+                case recomp::PakType::RumblePak: out = "Rumble Pak"; break;
+                default: out = "Controller Pak"; break;
+            }
+        });
+
+        constructor.BindEventCallback("set_pak_type",
+            [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
+                std::string pak_str = inputs.at(0).Get<std::string>();
+                recomp::PakType pak = recomp::PakType::ControllerPak;
+                if (pak_str == "RumblePak") pak = recomp::PakType::RumblePak;
+                recomp::set_port_pak_type(selected_port, pak);
+                port_pak_type_index = static_cast<int>(pak);
+                model_handle.DirtyVariable("pak_type");
+                model_handle.DirtyVariable("port_pak_type_index");
+                zelda64::save_config();
+            });
 
         constructor.BindFunc("assigned_controller_name", [](Rml::Variant& out) {
             out = recomp::get_port_controller_name(selected_port);
