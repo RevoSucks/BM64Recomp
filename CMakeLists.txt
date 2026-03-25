@@ -27,6 +27,8 @@ endif()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     option(RECOMP_FLATPAK "Configure the build for Flatpak compatibility." OFF)
+    # Use xdg-desktop-portal for file dialogs to avoid GTK runtime mismatches in AppImages.
+    set(NFD_PORTAL ON CACHE BOOL "Use xdg-desktop-portal for native file dialogs on Linux" FORCE)
 endif()
 
 # Avoid warning about DOWNLOAD_EXTRACT_TIMESTAMP in CMake 3.24:

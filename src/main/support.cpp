@@ -48,10 +48,24 @@ namespace zelda64 {
     std::filesystem::path get_program_path() {
 #if defined(__APPLE__)
         return get_bundle_resource_directory();
-#elif defined(__linux__) && defined(RECOMP_FLATPAK)
-        return "/app/bin";
 #else
-        return "";
+        // Resolve resources relative to the executable location instead of the launch
+        // working directory so packaged builds (e.g. AppImage) work from any CWD.
+        static const std::filesystem::path program_path = []() -> std::filesystem::path {
+            char* base_path = SDL_GetBasePath();
+            if (base_path != nullptr) {
+                std::filesystem::path ret{ base_path };
+                SDL_free(base_path);
+                return ret;
+            }
+#if defined(__linux__) && defined(RECOMP_FLATPAK)
+            return "/app/bin";
+#else
+            std::error_code ec;
+            return std::filesystem::current_path(ec);
+#endif
+        }();
+        return program_path;
 #endif
     }
 

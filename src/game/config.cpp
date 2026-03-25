@@ -134,7 +134,14 @@ namespace recomp {
 }
 
 std::filesystem::path zelda64::get_app_folder_path() {
-   // directly check for portable.txt (windows and native linux binary)
+   // Prefer portable.txt next to the executable so portable mode works even
+   // when launched from a different working directory.
+   const auto program_path = zelda64::get_program_path();
+   if (!program_path.empty() && std::filesystem::exists(program_path / "portable.txt")) {
+       return program_path;
+   }
+
+   // Keep compatibility with legacy launchers that rely on the current dir.
    if (std::filesystem::exists("portable.txt")) {
        return std::filesystem::current_path();
    }

@@ -13,9 +13,8 @@ else
 fi
 
 curl -sSfLO "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$LINUX_DEPLOY_ARCH.AppImage"
-curl -sSfLO "https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/raw/master/linuxdeploy-plugin-gtk.sh"
 
-chmod a+x linuxdeploy*
+chmod a+x "linuxdeploy-$LINUX_DEPLOY_ARCH.AppImage"
  
 mkdir -p AppDir/usr/bin
 cp BM64Recompiled AppDir/usr/bin/
@@ -26,20 +25,22 @@ cp .github/linux/BM64Recompiled.desktop AppDir/
 
 "./linuxdeploy-$LINUX_DEPLOY_ARCH.AppImage" --appimage-extract
 mv squashfs-root/ deploy
-./deploy/AppRun --appdir=AppDir/ -d AppDir/BM64Recompiled.desktop -i AppDir/BM64Recompiled.png -e AppDir/usr/bin/BM64Recompiled --plugin gtk
-sed -i 's/exec/#exec/g' AppDir/AppRun
-echo 'if [ -f "portable.txt" ]; then' >> AppDir/AppRun
-echo '    APP_FOLDER_PATH=$PWD' >> AppDir/AppRun
-echo '    cd "$this_dir"/usr/bin/' >> AppDir/AppRun
-echo '    APP_FOLDER_PATH=$APP_FOLDER_PATH ./BM64Recompiled' >> AppDir/AppRun
-echo 'else' >> AppDir/AppRun
-echo '    cd "$this_dir"/usr/bin/' >> AppDir/AppRun
-echo '    ./BM64Recompiled' >> AppDir/AppRun
-echo 'fi' >> AppDir/AppRun
+./deploy/AppRun --appdir=AppDir/ -d AppDir/BM64Recompiled.desktop -i AppDir/BM64Recompiled.png -e AppDir/usr/bin/BM64Recompiled
 
-# Remove conflicting libraries
-rm -rf AppDir/usr/lib/libgmodule*
-rm -rf AppDir/usr/lib/gio/modules/*.so
-rm -rf AppDir/usr/lib/libwayland*
+# linuxdeploy may create AppRun as a symlink to the binary; remove it first
+# so we don't overwrite the actual executable through the symlink.
+rm -f AppDir/AppRun
+cat > AppDir/AppRun << 'APPRUN'
+#!/bin/bash
+this_dir="$(dirname "$(readlink -f "$0")")"
+export LD_LIBRARY_PATH="$this_dir/usr/lib:$LD_LIBRARY_PATH"
+if [ -f "portable.txt" ]; then
+    APP_FOLDER_PATH="$PWD" exec "$this_dir/usr/bin/BM64Recompiled" "$@"
+else
+    cd "$this_dir/usr/bin/"
+    exec ./BM64Recompiled "$@"
+fi
+APPRUN
+chmod +x AppDir/AppRun
 
 ./deploy/usr/bin/linuxdeploy-plugin-appimage --appdir=AppDir

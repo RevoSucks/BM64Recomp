@@ -700,7 +700,11 @@ int main(int argc, char** argv) {
 
     recomp::start(cfg);
 
+    // Skip NFD_Quit on Linux: the portal backend's dbus_bus_get() returns a shared
+    // connection that aborts on unref. Process exit cleans up the connection safely.
+#ifndef __linux__
     NFD_Quit();
+#endif
 
     if (preloaded) {
         release_preload(preload_context);
