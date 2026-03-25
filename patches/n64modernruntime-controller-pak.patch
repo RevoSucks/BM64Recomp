@@ -1,0 +1,2043 @@
+diff --git a/librecomp/CMakeLists.txt b/librecomp/CMakeLists.txt
+index fcc3337..5e000ed 100644
+--- a/librecomp/CMakeLists.txt
++++ b/librecomp/CMakeLists.txt
+@@ -13,7 +13,6 @@ add_library(librecomp STATIC
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/eep.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/euc-jp.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/extensions.cpp"
+-    "${CMAKE_CURRENT_SOURCE_DIR}/src/files.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/flash.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/heap.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/math_routines.cpp"
+@@ -23,8 +22,8 @@ add_library(librecomp STATIC
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/mod_manifest.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/mod_config_api.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/overlays.cpp"
+-    "${CMAKE_CURRENT_SOURCE_DIR}/src/pak.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/patcher.cpp"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src/pfs.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/pi.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/print.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/recomp.cpp"
+diff --git a/librecomp/include/librecomp/game.hpp b/librecomp/include/librecomp/game.hpp
+index 6df55ee..1695765 100644
+--- a/librecomp/include/librecomp/game.hpp
++++ b/librecomp/include/librecomp/game.hpp
+@@ -7,17 +7,10 @@
+ #include "recomp.h"
+ #include "rsp.hpp"
+ #include <ultramodern/ultramodern.hpp>
++#include <ultramodern/save.hpp>
+ 
+ namespace recomp {
+-    enum class SaveType {
+-        None,
+-        Eep4k,
+-        Eep16k,
+-        Sram,
+-        Flashram,
+-        AllowAll, // Allows all save types to work and reports eeprom size as 16kbit.
+-    };
+-
++    using SaveType = ultramodern::SaveType;
+     struct GameEntry {
+         uint64_t rom_hash;
+         std::string internal_name;
+@@ -109,11 +102,6 @@ namespace recomp {
+     /// 
+     void start(const Configuration& cfg);
+ 
+-    SaveType get_save_type();
+-    bool eeprom_allowed();
+-    bool sram_allowed();
+-    bool flashram_allowed();
+-
+     void start_game(const std::u8string& game_id);
+     std::u8string current_game_id();
+     std::string current_mod_game_id();
+diff --git a/librecomp/include/librecomp/helpers.hpp b/librecomp/include/librecomp/helpers.hpp
+index d8f5afd..eb9f86f 100644
+--- a/librecomp/include/librecomp/helpers.hpp
++++ b/librecomp/include/librecomp/helpers.hpp
+@@ -7,8 +7,7 @@
+ #include <ultramodern/ultra64.h>
+ 
+ template<int index, typename T>
+-T _arg(uint8_t* rdram, recomp_context* ctx) {
+-    static_assert(index < 4, "Only args 0 through 3 supported");
++T _arg(uint8_t* rdram, recomp_context* ctx) requires(index < 4) {
+     gpr raw_arg = (&ctx->r4)[index];
+     if constexpr (std::is_same_v<T, float>) {
+         if constexpr (index < 2) {
+@@ -38,6 +37,25 @@ T _arg(uint8_t* rdram, recomp_context* ctx) {
+     }
+ }
+ 
++template<int index, typename T>
++T _arg(uint8_t* rdram, recomp_context* ctx) requires(index >= 4) {
++    const auto raw_arg = MEM_W(index * 4, ctx->r29);
++    if constexpr (std::is_pointer_v<T>) {
++        static_assert (!std::is_pointer_v<std::remove_pointer_t<T>>, "Double pointers not supported");
++        return TO_PTR(std::remove_pointer_t<T>, raw_arg);
++    }
++    else if constexpr (std::is_integral_v<T>) {
++        static_assert(sizeof(T) <= 4, "64-bit args not supported");
++        return static_cast<T>(raw_arg);
++    }
++    else {
++        // static_assert in else workaround
++        [] <bool flag = false>() {
++            static_assert(flag, "Unsupported type");
++        }();
++    }
++}
++
+ inline float _arg_float_a1(uint8_t* rdram, recomp_context* ctx) {
+     (void)rdram;
+     union {
+diff --git a/librecomp/src/eep.cpp b/librecomp/src/eep.cpp
+index 048246e..94fedf6 100644
+--- a/librecomp/src/eep.cpp
++++ b/librecomp/src/eep.cpp
+@@ -1,20 +1,19 @@
+ #include "recomp.h"
+ #include "librecomp/game.hpp"
+ 
+-#include "ultramodern/ultra64.h"
+-
+-void save_write(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t count);
+-void save_read(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t count);
++#include <ultramodern/save.hpp>
++#include <ultramodern/ultra64.h>
+ 
+ constexpr int eeprom_block_size = 8;
++static std::vector<uint8_t> save_buffer;
+ 
+ extern "C" void osEepromProbe_recomp(uint8_t* rdram, recomp_context* ctx) {
+-    switch (recomp::get_save_type()) {
+-        case recomp::SaveType::AllowAll:
+-        case recomp::SaveType::Eep16k:
++    switch (ultramodern::get_save_type()) {
++        case ultramodern::SaveType::AllowAll:
++        case ultramodern::SaveType::Eep16k:
+             ctx->r2 = 0x02; // EEPROM_TYPE_16K
+             break;
+-        case recomp::SaveType::Eep4k:
++        case ultramodern::SaveType::Eep4k:
+             ctx->r2 = 0x01; // EEPROM_TYPE_4K
+             break;
+         default:
+@@ -24,7 +23,7 @@ extern "C" void osEepromProbe_recomp(uint8_t* rdram, recomp_context* ctx) {
+ }
+ 
+ extern "C" void osEepromWrite_recomp(uint8_t* rdram, recomp_context* ctx) {
+-    if (!recomp::eeprom_allowed()) {
++    if (!ultramodern::eeprom_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use EEPROM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -33,13 +32,17 @@ extern "C" void osEepromWrite_recomp(uint8_t* rdram, recomp_context* ctx) {
+     gpr buffer = ctx->r6;
+     int32_t nbytes = eeprom_block_size;
+ 
+-    save_write(rdram, buffer, eep_address * eeprom_block_size, nbytes);
++    save_buffer.resize(nbytes);
++    for (uint32_t i = 0; i < nbytes; i++) {
++        save_buffer[i] = MEM_B(i, buffer);
++    }
++    ultramodern::save_write_ptr(save_buffer.data(), eep_address * eeprom_block_size, nbytes);
+ 
+     ctx->r2 = 0;
+ }
+ 
+ extern "C" void osEepromLongWrite_recomp(uint8_t* rdram, recomp_context* ctx) {
+-    if (!recomp::eeprom_allowed()) {
++    if (!ultramodern::eeprom_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use EEPROM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -50,13 +53,17 @@ extern "C" void osEepromLongWrite_recomp(uint8_t* rdram, recomp_context* ctx) {
+ 
+     assert((nbytes % eeprom_block_size) == 0);
+ 
+-    save_write(rdram, buffer, eep_address * eeprom_block_size, nbytes);
++    save_buffer.resize(nbytes);
++    for (uint32_t i = 0; i < nbytes; i++) {
++        save_buffer[i] = MEM_B(i, buffer);
++    }
++    ultramodern::save_write_ptr(save_buffer.data(), eep_address * eeprom_block_size, nbytes);
+ 
+     ctx->r2 = 0;
+ }
+ 
+ extern "C" void osEepromRead_recomp(uint8_t* rdram, recomp_context* ctx) {
+-    if (!recomp::eeprom_allowed()) {
++    if (!ultramodern::eeprom_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use EEPROM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -65,13 +72,17 @@ extern "C" void osEepromRead_recomp(uint8_t* rdram, recomp_context* ctx) {
+     gpr buffer = ctx->r6;
+     int32_t nbytes = eeprom_block_size;
+ 
+-    save_read(rdram, buffer, eep_address * eeprom_block_size, nbytes);
++    save_buffer.resize(nbytes);
++    ultramodern::save_read_ptr(save_buffer.data(), eep_address * eeprom_block_size, nbytes);
++    for (uint32_t i = 0; i < nbytes; i++) {
++        MEM_B(i, buffer) = save_buffer[i];
++    }
+ 
+     ctx->r2 = 0;
+ }
+ 
+ extern "C" void osEepromLongRead_recomp(uint8_t* rdram, recomp_context* ctx) {
+-    if (!recomp::eeprom_allowed()) {
++    if (!ultramodern::eeprom_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use EEPROM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -82,7 +93,11 @@ extern "C" void osEepromLongRead_recomp(uint8_t* rdram, recomp_context* ctx) {
+ 
+     assert((nbytes % eeprom_block_size) == 0);
+ 
+-    save_read(rdram, buffer, eep_address * eeprom_block_size, nbytes);
++    save_buffer.resize(nbytes);
++    ultramodern::save_read_ptr(save_buffer.data(), eep_address * eeprom_block_size, nbytes);
++    for (uint32_t i = 0; i < nbytes; i++) {
++        MEM_B(i, buffer) = save_buffer[i];
++    }
+ 
+     ctx->r2 = 0;
+ }
+diff --git a/librecomp/src/flash.cpp b/librecomp/src/flash.cpp
+index f46261c..9a877aa 100644
+--- a/librecomp/src/flash.cpp
++++ b/librecomp/src/flash.cpp
+@@ -1,5 +1,6 @@
+ #include <array>
+ #include <cassert>
++#include <ultramodern/save.hpp>
+ #include <ultramodern/ultra64.h>
+ #include <ultramodern/ultramodern.hpp>
+ #include "recomp.h"
+@@ -15,15 +16,11 @@ constexpr uint32_t page_count = flash_size / page_size;
+ constexpr uint32_t sector_size = page_size * pages_per_sector;
+ constexpr uint32_t sector_count = flash_size / sector_size;
+ 
+-void save_write_ptr(const void* in, uint32_t offset, uint32_t count);
+-void save_write(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t count);
+-void save_read(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t count);
+-void save_clear(uint32_t start, uint32_t size, char value);
+-
+ std::array<char, page_size> write_buffer;
++std::vector<uint8_t> save_buffer;
+ 
+ extern "C" void osFlashInit_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -32,7 +29,7 @@ extern "C" void osFlashInit_recomp(uint8_t * rdram, recomp_context * ctx) {
+ }
+ 
+ extern "C" void osFlashReadStatus_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -43,7 +40,7 @@ extern "C" void osFlashReadStatus_recomp(uint8_t * rdram, recomp_context * ctx)
+ }
+ 
+ extern "C" void osFlashReadId_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -57,7 +54,7 @@ extern "C" void osFlashReadId_recomp(uint8_t * rdram, recomp_context * ctx) {
+ }
+ 
+ extern "C" void osFlashClearStatus_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -66,30 +63,30 @@ extern "C" void osFlashClearStatus_recomp(uint8_t * rdram, recomp_context * ctx)
+ }
+ 
+ extern "C" void osFlashAllErase_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+ 
+-    save_clear(0, ultramodern::save_size, 0xFF);
++    ultramodern::save_clear(0, ultramodern::save_size, 0xFF);
+ 
+     ctx->r2 = 0;
+ }
+ 
+ extern "C" void osFlashAllEraseThrough_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+ 
+-    save_clear(0, ultramodern::save_size, 0xFF);
++    ultramodern::save_clear(0, ultramodern::save_size, 0xFF);
+ 
+     ctx->r2 = 0;
+ }
+ 
+ // This function is named sector but really means page.
+ extern "C" void osFlashSectorErase_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -102,14 +99,14 @@ extern "C" void osFlashSectorErase_recomp(uint8_t * rdram, recomp_context * ctx)
+         return;
+     }
+ 
+-    save_clear(page_num * page_size, page_size, 0xFF);
++    ultramodern::save_clear(page_num * page_size, page_size, 0xFF);
+ 
+     ctx->r2 = 0;
+ }
+ 
+ // Same naming issue as above.
+ extern "C" void osFlashSectorEraseThrough_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -122,13 +119,13 @@ extern "C" void osFlashSectorEraseThrough_recomp(uint8_t * rdram, recomp_context
+         return;
+     }
+ 
+-    save_clear(page_num * page_size, page_size, 0xFF);
++    ultramodern::save_clear(page_num * page_size, page_size, 0xFF);
+ 
+     ctx->r2 = 0;
+ }
+ 
+ extern "C" void osFlashCheckEraseEnd_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -138,7 +135,7 @@ extern "C" void osFlashCheckEraseEnd_recomp(uint8_t * rdram, recomp_context * ct
+ }
+ 
+ extern "C" void osFlashWriteBuffer_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -160,7 +157,7 @@ extern "C" void osFlashWriteBuffer_recomp(uint8_t * rdram, recomp_context * ctx)
+ }
+ 
+ extern "C" void osFlashWriteArray_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -168,13 +165,13 @@ extern "C" void osFlashWriteArray_recomp(uint8_t * rdram, recomp_context * ctx)
+     uint32_t page_num = ctx->r4;
+ 
+     // Copy the write buffer into the save file
+-    save_write_ptr(write_buffer.data(), page_num * page_size, page_size);
++    ultramodern::save_write_ptr(write_buffer.data(), page_num * page_size, page_size);
+ 
+     ctx->r2 = 0;
+ }
+ 
+ extern "C" void osFlashReadArray_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+@@ -190,7 +187,11 @@ extern "C" void osFlashReadArray_recomp(uint8_t * rdram, recomp_context * ctx) {
+     uint32_t count = n_pages * page_size;
+ 
+     // Read from the save file into the provided buffer
+-    save_read(PASS_RDRAM dramAddr, offset, count);
++    save_buffer.resize(count);
++    ultramodern::save_read_ptr(save_buffer.data(), offset, count);
++    for (uint32_t i = 0; i < count; i++) {
++        MEM_B(i, dramAddr) = save_buffer[i];
++    }
+ 
+     // Send the message indicating read completion
+     ultramodern::enqueue_external_message_src(mq, 0, false, ultramodern::EventMessageSource::Pi);
+@@ -199,7 +200,7 @@ extern "C" void osFlashReadArray_recomp(uint8_t * rdram, recomp_context * ctx) {
+ }
+ 
+ extern "C" void osFlashChange_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    if (!recomp::flashram_allowed()) {
++    if (!ultramodern::flashram_allowed()) {
+         ultramodern::error_handling::message_box("Attempted to use FlashRAM saving with other save type");
+         ULTRAMODERN_QUICK_EXIT();
+     }
+diff --git a/librecomp/src/mod_manifest.cpp b/librecomp/src/mod_manifest.cpp
+index a75d253..b9b5134 100644
+--- a/librecomp/src/mod_manifest.cpp
++++ b/librecomp/src/mod_manifest.cpp
+@@ -3,8 +3,8 @@
+ #include "json/json.hpp"
+ 
+ #include "recompiler/context.h"
+-#include "librecomp/files.hpp"
+ #include "librecomp/mods.hpp"
++#include <ultramodern/files.hpp>
+ 
+ static bool read_json(std::ifstream input_file, nlohmann::json &json_out) {
+     if (!input_file.good()) {
+@@ -27,7 +27,7 @@ static bool read_json_with_backups(const std::filesystem::path &path, nlohmann::
+     }
+ 
+     // Try reading and parsing the backup file.
+-    if (read_json(recomp::open_input_backup_file(path), json_out)) {
++    if (read_json(ultramodern::open_input_backup_file(path), json_out)) {
+         return true;
+     }
+ 
+diff --git a/librecomp/src/mods.cpp b/librecomp/src/mods.cpp
+index ff40212..e4ef3c8 100644
+--- a/librecomp/src/mods.cpp
++++ b/librecomp/src/mods.cpp
+@@ -3,7 +3,7 @@
+ #include <sstream>
+ #include <functional>
+ 
+-#include "librecomp/files.hpp"
++#include <ultramodern/files.hpp>
+ #include "librecomp/mods.hpp"
+ #include "librecomp/overlays.hpp"
+ #include "librecomp/game.hpp"
+@@ -32,7 +32,7 @@ static bool read_json_with_backups(const std::filesystem::path &path, nlohmann::
+     }
+ 
+     // Try reading and parsing the backup file.
+-    if (read_json(recomp::open_input_backup_file(path), json_out)) {
++    if (read_json(ultramodern::open_input_backup_file(path), json_out)) {
+         return true;
+     }
+ 
+@@ -679,7 +679,7 @@ bool save_mod_config_storage(const std::filesystem::path &path, const std::strin
+         }
+     }
+ 
+-    std::ofstream output_file = recomp::open_output_file_with_backup(path);
++    std::ofstream output_file = ultramodern::open_output_file_with_backup(path);
+     if (!output_file.good()) {
+         return false;
+     }
+@@ -687,7 +687,7 @@ bool save_mod_config_storage(const std::filesystem::path &path, const std::strin
+     output_file << std::setw(4) << config_json;
+     output_file.close();
+ 
+-    return recomp::finalize_output_file_with_backup(path);
++    return ultramodern::finalize_output_file_with_backup(path);
+ }
+ 
+ bool parse_mods_config(const std::filesystem::path &path, std::unordered_set<std::string> &enabled_mods, std::vector<std::string> &mod_order) {
+@@ -720,7 +720,7 @@ bool save_mods_config(const std::filesystem::path &path, const std::unordered_se
+     config_json["enabled_mods"] = enabled_mods;
+     config_json["mod_order"] = mod_order;
+ 
+-    std::ofstream output_file = recomp::open_output_file_with_backup(path);
++    std::ofstream output_file = ultramodern::open_output_file_with_backup(path);
+     if (!output_file.good()) {
+         return false;
+     }
+@@ -728,7 +728,7 @@ bool save_mods_config(const std::filesystem::path &path, const std::unordered_se
+     output_file << std::setw(4) << config_json;
+     output_file.close();
+ 
+-    return recomp::finalize_output_file_with_backup(path);
++    return ultramodern::finalize_output_file_with_backup(path);
+ }
+ 
+ void recomp::mods::ModContext::dirty_mod_configuration_thread_process() {
+diff --git a/librecomp/src/pak.cpp b/librecomp/src/pak.cpp
+deleted file mode 100644
+index 0be1513..0000000
+--- a/librecomp/src/pak.cpp
++++ /dev/null
+@@ -1,51 +0,0 @@
+-#include "ultramodern/ultra64.h"
+-#include "ultramodern/ultramodern.hpp"
+-
+-#include "recomp.h"
+-#include "helpers.hpp"
+-
+-extern "C" void osPfsInitPak_recomp(uint8_t * rdram, recomp_context* ctx) {
+-    ctx->r2 = 1; // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsFreeBlocks_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    ctx->r2 = 1; // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsAllocateFile_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    ctx->r2 = 1; // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsDeleteFile_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    ctx->r2 = 1; // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsFileState_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    ctx->r2 = 1; // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsFindFile_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    ctx->r2 = 1; // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsReadWriteFile_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    ctx->r2 = 1; // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsChecker_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    ctx->r2 = 1; // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsNumFiles_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    s32* max_files = _arg<1, s32*>(rdram, ctx);
+-    s32* files_used = _arg<2, s32*>(rdram, ctx);
+-
+-    *max_files = 0;
+-    *files_used = 0;
+-
+-    _return<s32>(ctx, 1); // PFS_ERR_NOPACK
+-}
+-
+-extern "C" void osPfsRepairId_recomp(uint8_t * rdram, recomp_context * ctx) {
+-    _return<s32>(ctx, 1); // PFS_ERR_NOPACK
+-}
+diff --git a/librecomp/src/pfs.cpp b/librecomp/src/pfs.cpp
+new file mode 100644
+index 0000000..2145056
+--- /dev/null
++++ b/librecomp/src/pfs.cpp
+@@ -0,0 +1,189 @@
++#include "ultramodern/ultramodern.hpp"
++
++#include "helpers.hpp"
++
++extern "C" void osPfsInitPak_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSMesgQueue) mq = _arg<0, PTR(OSMesgQueue)>(rdram, ctx);
++    PTR(OSPfs) pfs = _arg<1, PTR(OSPfs)>(rdram, ctx);
++    int channel = _arg<2, int>(rdram, ctx);
++
++    s32 ret = osPfsInitPak(PASS_RDRAM mq, pfs, channel);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsRepairId_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++
++    s32 ret = osPfsRepairId(PASS_RDRAM pfs);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsInit_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSMesgQueue) mq = _arg<0, PTR(OSMesgQueue)>(rdram, ctx);
++    PTR(OSPfs) pfs = _arg<1, PTR(OSPfs)>(rdram, ctx);
++    int channel = _arg<2, int>(rdram, ctx);
++
++    s32 ret = osPfsInit(PASS_RDRAM mq, pfs, channel);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsReFormat_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    PTR(OSMesgQueue) mq = _arg<1, PTR(OSMesgQueue)>(rdram, ctx);
++    int channel = _arg<2, int>(rdram, ctx);
++
++    s32 ret = osPfsReFormat(PASS_RDRAM pfs, mq, channel);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsChecker_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++
++    s32 ret = osPfsChecker(PASS_RDRAM pfs);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsAllocateFile_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    u16 company_code = _arg<1, u16>(rdram, ctx);
++    u32 game_code = _arg<2, u32>(rdram, ctx);
++    PTR(u8) game_name = _arg<3, PTR(u8)>(rdram, ctx);
++    PTR(u8) ext_name = _arg<4, PTR(u8)>(rdram, ctx);
++    int nbytes = _arg<5, int>(rdram, ctx);
++    PTR(s32) file_no = _arg<6, PTR(s32)>(rdram, ctx);
++    u8 game_name_proxy[PFS_FILE_NAME_LEN];
++    u8 ext_name_proxy[PFS_FILE_EXT_LEN];
++
++    for (uint32_t i = 0; i < PFS_FILE_NAME_LEN; i++) {
++        game_name_proxy[i] = MEM_B(i, (gpr)game_name);
++    }
++    for (uint32_t i = 0; i < PFS_FILE_EXT_LEN; i++) {
++        ext_name_proxy[i] = MEM_B(i, (gpr)ext_name);
++    }
++    s32 ret = osPfsAllocateFile(PASS_RDRAM pfs, company_code, game_code, game_name_proxy, ext_name_proxy, nbytes, file_no);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsFindFile_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    u16 company_code = _arg<1, u16>(rdram, ctx);
++    u32 game_code = _arg<2, u32>(rdram, ctx);
++    PTR(u8) game_name = _arg<3, PTR(u8)>(rdram, ctx);
++    PTR(u8) ext_name = _arg<4, PTR(u8)>(rdram, ctx);
++    PTR(s32) file_no = _arg<5, PTR(s32)>(rdram, ctx);
++    u8 game_name_proxy[PFS_FILE_NAME_LEN];
++    u8 ext_name_proxy[PFS_FILE_EXT_LEN];
++
++    for (uint32_t i = 0; i < PFS_FILE_NAME_LEN; i++) {
++        game_name_proxy[i] = MEM_B(i, (gpr)game_name);
++    }
++    for (uint32_t i = 0; i < PFS_FILE_EXT_LEN; i++) {
++        ext_name_proxy[i] = MEM_B(i, (gpr)ext_name);
++    }
++    s32 ret = osPfsFindFile(PASS_RDRAM pfs, company_code, game_code, game_name_proxy, ext_name_proxy, file_no);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsDeleteFile_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    u16 company_code = _arg<1, u16>(rdram, ctx);
++    u32 game_code = _arg<2, u32>(rdram, ctx);
++    PTR(u8) game_name = _arg<3, PTR(u8)>(rdram, ctx);
++    PTR(u8) ext_name = _arg<4, PTR(u8)>(rdram, ctx);
++    u8 game_name_proxy[PFS_FILE_NAME_LEN];
++    u8 ext_name_proxy[PFS_FILE_EXT_LEN];
++
++    for (uint32_t i = 0; i < PFS_FILE_NAME_LEN; i++) {
++        game_name_proxy[i] = MEM_B(i, (gpr)game_name);
++    }
++    for (uint32_t i = 0; i < PFS_FILE_EXT_LEN; i++) {
++        ext_name_proxy[i] = MEM_B(i, (gpr)ext_name);
++    }
++    s32 ret = osPfsDeleteFile(PASS_RDRAM pfs, company_code, game_code, game_name_proxy, ext_name_proxy);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsReadWriteFile_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    s32 file_no = _arg<1, s32>(rdram, ctx);
++    u8 flag = _arg<2, u8>(rdram, ctx);
++    int offset = _arg<3, int>(rdram, ctx);
++    int nbytes = _arg<4, int>(rdram, ctx);
++    PTR(u8) data_buffer = _arg<5, PTR(u8)>(rdram, ctx);
++    std::vector<u8> data_buffer_proxy(nbytes);
++
++    if (flag == PFS_WRITE) {
++        for (uint32_t i = 0; i < nbytes; i++) {
++            data_buffer_proxy[i] = MEM_B(i, (gpr)data_buffer);
++        }
++    }
++    s32 ret = osPfsReadWriteFile(PASS_RDRAM pfs, file_no, flag, offset, nbytes, data_buffer_proxy.data());
++    if (flag == PFS_READ) {
++        for (uint32_t i = 0; i < nbytes; i++) {
++            MEM_B(i, (gpr)data_buffer) = data_buffer_proxy[i];
++        }
++    }
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsFileState_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    s32 file_no = _arg<1, s32>(rdram, ctx);
++    PTR(OSPfsState) state = _arg<2, PTR(OSPfsState)>(rdram, ctx);
++
++    s32 ret = osPfsFileState(PASS_RDRAM pfs, file_no, state);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsGetLabel_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    PTR(u8) label = _arg<1, PTR(u8)>(rdram, ctx);
++    PTR(int) len = _arg<2, PTR(int)>(rdram, ctx);
++    u8 label_proxy[32];
++
++    s32 ret = osPfsGetLabel(PASS_RDRAM pfs, label_proxy, len);
++    for (uint32_t i = 0; i < 32; i++) {
++        MEM_B(i, (gpr)label) = label_proxy[i];
++    }
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsSetLabel_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    PTR(u8) label = _arg<1, PTR(u8)>(rdram, ctx);
++    u8 label_proxy[32];
++
++    for (uint32_t i = 0; i < 32; i++) {
++        label_proxy[i] = MEM_B(i, (gpr)label);
++    }
++    s32 ret = osPfsSetLabel(PASS_RDRAM pfs, label_proxy);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsIsPlug_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSMesgQueue) mq = _arg<0, PTR(OSMesgQueue)>(rdram, ctx);
++    PTR(u8) pattern = _arg<1, PTR(u8)>(rdram, ctx);
++    u8 pattern_proxy = 0;
++
++    s32 ret = osPfsIsPlug(PASS_RDRAM mq, &pattern_proxy);
++    MEM_B(0, (gpr)pattern) = pattern_proxy;
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsFreeBlocks_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    PTR(s32) bytes_not_used = _arg<1, PTR(s32)>(rdram, ctx);
++
++    s32 ret = osPfsFreeBlocks(PASS_RDRAM pfs, bytes_not_used);
++    _return<s32>(ctx, ret);
++}
++
++extern "C" void osPfsNumFiles_recomp(uint8_t* rdram, recomp_context* ctx) {
++    PTR(OSPfs) pfs = _arg<0, PTR(OSPfs)>(rdram, ctx);
++    PTR(s32) max_files = _arg<1, PTR(s32)>(rdram, ctx);
++    PTR(s32) files_used = _arg<2, PTR(s32)>(rdram, ctx);
++
++    s32 ret = osPfsNumFiles(PASS_RDRAM pfs, max_files, files_used);
++    _return<s32>(ctx, ret);
++}
++
+diff --git a/librecomp/src/pi.cpp b/librecomp/src/pi.cpp
+index 43509ba..67cd86d 100644
+--- a/librecomp/src/pi.cpp
++++ b/librecomp/src/pi.cpp
+@@ -7,11 +7,12 @@
+ #include "recomp.h"
+ #include "librecomp/addresses.hpp"
+ #include "librecomp/game.hpp"
+-#include "librecomp/files.hpp"
++#include <ultramodern/files.hpp>
+ #include <ultramodern/ultra64.h>
+ #include <ultramodern/ultramodern.hpp>
+ 
+ static std::vector<uint8_t> rom;
++static std::vector<uint8_t> save_buffer;
+ 
+ bool recomp::is_rom_loaded() {
+     return !rom.empty();
+@@ -84,188 +85,6 @@ void recomp::do_rom_pio(uint8_t* rdram, gpr ram_address, uint32_t physical_addr)
+     MEM_B(3, ram_address) = *rom_addr++;
+ }
+ 
+-struct {
+-    std::vector<char> save_buffer;
+-    std::thread saving_thread;
+-    std::filesystem::path save_file_path;
+-    moodycamel::LightweightSemaphore write_sempahore;
+-    // Used to tell the saving thread that a file swap is pending.
+-    moodycamel::LightweightSemaphore swap_file_pending_sempahore;
+-    // Used to tell the consumer thread that the saving thread is ready for a file swap.
+-    moodycamel::LightweightSemaphore swap_file_ready_sempahore;
+-    std::mutex save_buffer_mutex;
+-} save_context;
+-
+-const std::u8string save_folder = u8"saves";
+-
+-extern std::filesystem::path config_path;
+-
+-std::filesystem::path ultramodern::get_save_file_path() {
+-    return save_context.save_file_path;
+-}
+-
+-void set_save_file_path(const std::u8string& subfolder, const std::u8string& name) {
+-    std::filesystem::path save_folder_path = config_path / save_folder;
+-    if (!subfolder.empty()) {
+-        save_folder_path = save_folder_path / subfolder;
+-    }
+-    save_context.save_file_path = save_folder_path / (name + u8".bin");
+-}
+-
+-void update_save_file() {
+-    bool saving_failed = false;
+-    {
+-        std::ofstream save_file = recomp::open_output_file_with_backup(ultramodern::get_save_file_path(), std::ios_base::binary);
+-
+-        if (save_file.good()) {
+-            std::lock_guard lock{ save_context.save_buffer_mutex };
+-            save_file.write(save_context.save_buffer.data(), save_context.save_buffer.size());
+-        }
+-        else {
+-            saving_failed = true;
+-        }
+-    }
+-    if (!saving_failed) {
+-        saving_failed = !recomp::finalize_output_file_with_backup(ultramodern::get_save_file_path());
+-    }
+-    if (saving_failed) {
+-        ultramodern::error_handling::message_box("Failed to write to the save file. Check your file permissions and whether the save folder has been moved to Dropbox or similar, as this can cause issues.");
+-    }
+-}
+-
+-extern std::atomic_bool exited;
+-
+-void saving_thread_func(RDRAM_ARG1) {
+-    while (!exited) {
+-        bool save_buffer_updated = false;
+-        // Repeatedly wait for a new action to be sent.
+-        constexpr int64_t wait_time_microseconds = 10000;
+-        constexpr int max_actions = 128;
+-        int num_actions = 0;
+-
+-        // Wait up to the given timeout for a write to come in. Allow multiple writes to coalesce together into a single save.
+-        // Cap the number of coalesced writes to guarantee that the save buffer eventually gets written out to the file even if the game
+-        // is constantly sending writes.
+-        while (save_context.write_sempahore.wait(wait_time_microseconds) && num_actions < max_actions) {
+-            save_buffer_updated = true;
+-            num_actions++;
+-        }
+-
+-        // If an action came through that affected the save file, save the updated contents.
+-        if (save_buffer_updated) {
+-            update_save_file();
+-        }
+-
+-        if (save_context.swap_file_pending_sempahore.tryWait()) {
+-            save_context.swap_file_ready_sempahore.signal();
+-        }
+-    }
+-}
+-
+-void save_write_ptr(const void* in, uint32_t offset, uint32_t count) {
+-    assert(offset + count <= save_context.save_buffer.size());
+-
+-    {
+-        std::lock_guard lock { save_context.save_buffer_mutex };
+-        memcpy(&save_context.save_buffer[offset], in, count);
+-    }
+-    
+-    save_context.write_sempahore.signal();
+-}
+-
+-void save_write(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t count) {
+-    assert(offset + count <= save_context.save_buffer.size());
+-
+-    {
+-        std::lock_guard lock { save_context.save_buffer_mutex };
+-        for (gpr i = 0; i < count; i++) {
+-            save_context.save_buffer[offset + i] = MEM_B(i, rdram_address);
+-        }
+-    }
+-
+-    save_context.write_sempahore.signal();
+-}
+-
+-void save_read(RDRAM_ARG PTR(void) rdram_address, uint32_t offset, uint32_t count) {
+-    assert(offset + count <= save_context.save_buffer.size());
+-
+-    std::lock_guard lock { save_context.save_buffer_mutex };
+-    for (gpr i = 0; i < count; i++) {
+-        MEM_B(i, rdram_address) = save_context.save_buffer[offset + i];
+-    }
+-}
+-
+-void save_clear(uint32_t start, uint32_t size, char value) {
+-    assert(start + size < save_context.save_buffer.size());
+-
+-    {
+-        std::lock_guard lock { save_context.save_buffer_mutex };
+-        std::fill_n(save_context.save_buffer.begin() + start, size, value);
+-    }
+-
+-    save_context.write_sempahore.signal();
+-}
+-
+-size_t get_save_size(recomp::SaveType save_type) {
+-    switch (save_type) {
+-        case recomp::SaveType::AllowAll:
+-        case recomp::SaveType::Flashram:
+-            return 0x20000;
+-        case recomp::SaveType::Sram:
+-            return 0x8000;
+-        case recomp::SaveType::Eep16k:
+-            return 0x800;
+-        case recomp::SaveType::Eep4k:
+-            return 0x200;
+-        case recomp::SaveType::None:
+-            return 0;
+-    }
+-    return 0;
+-}
+-
+-void read_save_file() {
+-    std::filesystem::path save_file_path = ultramodern::get_save_file_path();
+-
+-    // Ensure the save file directory exists.
+-    std::filesystem::create_directories(save_file_path.parent_path());
+-
+-    // Read the save file if it exists.
+-    std::ifstream save_file = recomp::open_input_file_with_backup(save_file_path, std::ios_base::binary);
+-    if (save_file.good()) {
+-        save_file.read(save_context.save_buffer.data(), save_context.save_buffer.size());
+-    }
+-    else {
+-        // Otherwise clear the save file to all zeroes.
+-        std::fill(save_context.save_buffer.begin(), save_context.save_buffer.end(), 0);
+-    }
+-}
+-
+-void ultramodern::init_saving(RDRAM_ARG1) {
+-    set_save_file_path(u8"", recomp::current_game_id());
+-
+-    save_context.save_buffer.resize(get_save_size(recomp::get_save_type()));
+-
+-    read_save_file();
+-
+-    save_context.saving_thread = std::thread{saving_thread_func, PASS_RDRAM};
+-}
+-
+-void ultramodern::change_save_file(const std::u8string& subfolder, const std::u8string& name) {
+-    // Tell the saving thread that a file swap is pending.
+-    save_context.swap_file_pending_sempahore.signal();
+-    // Wait until the saving thread indicates it's ready to swap files.
+-    save_context.swap_file_ready_sempahore.wait();
+-    // Perform the save file swap.
+-    set_save_file_path(subfolder, name);
+-    read_save_file();
+-}
+-
+-void ultramodern::join_saving_thread() {
+-    if (save_context.saving_thread.joinable()) {
+-        save_context.saving_thread.join();
+-    }
+-}
+-
+ void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, gpr rdram_address, uint32_t physical_addr, uint32_t size, uint32_t direction) {
+     // TODO asynchronous transfer
+     // TODO implement unaligned DMA correctly
+@@ -277,12 +96,16 @@ void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, gpr rdram_address, uint32_t physical_
+             // Send a message to the mq to indicate that the transfer completed
+             ultramodern::enqueue_external_message_src(mq, 0, false, ultramodern::EventMessageSource::Pi);
+         } else if (physical_addr >= recomp::sram_base) {
+-            if (!recomp::sram_allowed()) {
++            if (!ultramodern::sram_allowed()) {
+                 ultramodern::error_handling::message_box("Attempted to use SRAM saving with other save type");
+                 ULTRAMODERN_QUICK_EXIT();
+             }
+             // read sram
+-            save_read(rdram, rdram_address, physical_addr - recomp::sram_base, size);
++            save_buffer.resize(size);
++            ultramodern::save_read_ptr(save_buffer.data(), physical_addr - recomp::sram_base, size);
++            for (uint32_t i = 0; i < size; i++) {
++                MEM_B(i, rdram_address) = save_buffer[i];
++            }
+ 
+             // Send a message to the mq to indicate that the transfer completed
+             ultramodern::enqueue_external_message_src(mq, 0, false, ultramodern::EventMessageSource::Pi);
+@@ -294,12 +117,16 @@ void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, gpr rdram_address, uint32_t physical_
+             // write cart rom
+             throw std::runtime_error("ROM DMA write unimplemented");
+         } else if (physical_addr >= recomp::sram_base) {
+-            if (!recomp::sram_allowed()) {
++            if (!ultramodern::sram_allowed()) {
+                 ultramodern::error_handling::message_box("Attempted to use SRAM saving with other save type");
+                 ULTRAMODERN_QUICK_EXIT();
+             }
+             // write sram
+-            save_write(rdram, rdram_address, physical_addr - recomp::sram_base, size);
++            save_buffer.resize(size);
++            for (uint32_t i = 0; i < size; i++) {
++                save_buffer[i] = MEM_B(i, rdram_address);
++            }
++            ultramodern::save_write_ptr(save_buffer.data(), physical_addr - recomp::sram_base, size);
+ 
+             // Send a message to the mq to indicate that the transfer completed
+             ultramodern::enqueue_external_message_src(mq, 0, false, ultramodern::EventMessageSource::Pi);
+diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+index ea17675..a166c85 100644
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -21,6 +21,7 @@
+ #include "xxHash/xxh3.h"
+ #include "ultramodern/ultramodern.hpp"
+ #include "ultramodern/error_handling.hpp"
++#include "ultramodern/save.hpp"
+ #include "librecomp/addresses.hpp"
+ #include "librecomp/mods.hpp"
+ #include "recompiler/live_recompiler.h"
+@@ -57,8 +58,6 @@ std::unordered_map<std::u8string, recomp::GameEntry> game_roms {};
+ std::unique_ptr<recomp::mods::ModContext> mod_context = std::make_unique<recomp::mods::ModContext>();
+ // The project's version.
+ recomp::Version project_version;
+-// The current game's save type.
+-recomp::SaveType save_type = recomp::SaveType::None;
+ 
+ std::u8string recomp::GameEntry::stored_filename() const {
+     return game_id + u8".z64";
+@@ -687,8 +686,8 @@ bool wait_for_game_started(uint8_t* rdram, recomp_context* context) {
+ 
+                 recomp::init_heap(rdram, recomp::mod_rdram_start + mod_ram_used);
+ 
+-                save_type = game_entry.save_type;
+-                ultramodern::init_saving(rdram);
++                ultramodern::set_save_type(game_entry.save_type);
++                ultramodern::init_saving(rdram, recomp::current_game_id());
+ 
+                 try {
+                     game_entry.entrypoint(rdram, context);
+@@ -706,29 +705,6 @@ bool wait_for_game_started(uint8_t* rdram, recomp_context* context) {
+     }
+ }
+ 
+-recomp::SaveType recomp::get_save_type() {
+-    return save_type;
+-}
+-
+-bool recomp::eeprom_allowed() {
+-    return
+-        save_type == SaveType::Eep4k || 
+-        save_type == SaveType::Eep16k ||
+-        save_type == SaveType::AllowAll;
+-}
+-
+-bool recomp::sram_allowed() {
+-    return
+-        save_type == SaveType::Sram || 
+-        save_type == SaveType::AllowAll;
+-}
+-
+-bool recomp::flashram_allowed() {
+-    return
+-        save_type == SaveType::Flashram || 
+-        save_type == SaveType::AllowAll;
+-}
+-
+ void recomp::start(const recomp::Configuration& cfg) {
+     project_version = cfg.project_version;
+     recomp::check_all_stored_roms();
+diff --git a/ultramodern/CMakeLists.txt b/ultramodern/CMakeLists.txt
+index 5593172..54cdd9f 100644
+--- a/ultramodern/CMakeLists.txt
++++ b/ultramodern/CMakeLists.txt
+@@ -10,11 +10,14 @@ add_library(ultramodern STATIC
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/error_handling.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/events.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/extensions.cpp"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src/files.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/input.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/mesgqueue.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/misc_ultra.cpp"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src/pfs.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/renderer_context.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/rsp.cpp"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src/save.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/scheduling.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/task_win32.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/threadqueue.cpp"
+diff --git a/librecomp/include/librecomp/files.hpp b/ultramodern/include/ultramodern/files.hpp
+similarity index 80%
+rename from librecomp/include/librecomp/files.hpp
+rename to ultramodern/include/ultramodern/files.hpp
+index 63e3e9d..497d6d9 100644
+--- a/librecomp/include/librecomp/files.hpp
++++ b/ultramodern/include/ultramodern/files.hpp
+@@ -1,14 +1,15 @@
+-#ifndef __RECOMP_FILES_H__
+-#define __RECOMP_FILES_H__
++#ifndef __ULTRAMODERN_FILES_HPP__
++#define __ULTRAMODERN_FILES_HPP__
+ 
+ #include <filesystem>
+ #include <fstream>
+ 
+-namespace recomp {
++namespace ultramodern {
+     std::ifstream open_input_file_with_backup(const std::filesystem::path& filepath, std::ios_base::openmode mode = std::ios_base::in);
+     std::ifstream open_input_backup_file(const std::filesystem::path& filepath, std::ios_base::openmode mode = std::ios_base::in);
+     std::ofstream open_output_file_with_backup(const std::filesystem::path& filepath, std::ios_base::openmode mode = std::ios_base::out);
+     bool finalize_output_file_with_backup(const std::filesystem::path& filepath);
+-};
++}
++
++#endif // __ULTRAMODERN_FILES_HPP__
+ 
+-#endif
+diff --git a/ultramodern/include/ultramodern/input.hpp b/ultramodern/include/ultramodern/input.hpp
+index 1dab1b8..abb8e76 100644
+--- a/ultramodern/include/ultramodern/input.hpp
++++ b/ultramodern/include/ultramodern/input.hpp
+@@ -15,7 +15,7 @@ namespace ultramodern {
+         enum class Pak {
+             None,
+             RumblePak,
+-            // ControllerPak,
++            ControllerPak,
+             // TransferPak
+         };
+ 
+@@ -58,6 +58,11 @@ namespace ultramodern {
+ 
+         void set_callbacks(const callbacks_t& callbacks);
+     }
++
++    input::connected_device_info_t get_connected_device_info(int channel);
++
++    int get_max_controllers();
+ }
+ 
+ #endif
++
+diff --git a/ultramodern/include/ultramodern/save.hpp b/ultramodern/include/ultramodern/save.hpp
+new file mode 100644
+index 0000000..576c17c
+--- /dev/null
++++ b/ultramodern/include/ultramodern/save.hpp
+@@ -0,0 +1,49 @@
++#ifndef __ULTRAMODERN_SAVE_HPP__
++#define __ULTRAMODERN_SAVE_HPP__
++
++#include <string>
++#include <ultramodern/ultramodern.hpp>
++
++namespace ultramodern {
++    enum class SaveType {
++        None,
++        Eep4k,
++        Eep16k,
++        Sram,
++        Flashram,
++        AllowAll, // Allows all save types to work and reports eeprom size as 16kbit.
++    };
++
++    void set_save_type(SaveType type);
++
++    void set_save_file_path(const std::u8string& subfolder, const std::u8string& name);
++
++    void init_saving(RDRAM_ARG const std::u8string& name);
++
++    void change_save_file(const std::u8string& subfolder, const std::u8string& name);
++
++    void join_saving_thread();
++
++    void save_write_ptr(const void* in, uint32_t offset, uint32_t count);
++
++    void save_read_ptr(void *out, uint32_t offset, uint32_t count);
++
++    void save_clear(uint32_t start, uint32_t size, char value);
++
++    SaveType get_save_type();
++
++    size_t get_save_size(SaveType save_type);
++
++    std::filesystem::path get_save_base_path();
++
++    std::filesystem::path get_save_file_path();
++
++    bool eeprom_allowed();
++
++    bool sram_allowed();
++
++    bool flashram_allowed();
++}
++
++#endif // __ULTRAMODERN_SAVE_HPP__
++
+diff --git a/ultramodern/include/ultramodern/ultra64.h b/ultramodern/include/ultramodern/ultra64.h
+index 31eb106..7ca579e 100644
+--- a/ultramodern/include/ultramodern/ultra64.h
++++ b/ultramodern/include/ultramodern/ultra64.h
+@@ -74,6 +74,59 @@ typedef u64	OSTime;
+ #define OS_EVENT_THREADSTATUS     13    /* CPU thread status: used by rmon */
+ #define OS_EVENT_PRENMI           14    /* Pre NMI interrupt */
+ 
++/* Controller errors */
++
++#define CONT_NO_RESPONSE_ERROR          0x8
++#define CONT_OVERRUN_ERROR              0x4
++#define CONT_RANGE_ERROR               -1
++#define CONT_FRAME_ERROR                0x2
++#define CONT_COLLISION_ERROR            0x1
++
++/* Controller type */
++
++#define CONT_TYPE_NORMAL 0x0005
++#define CONT_TYPE_MOUSE  0x0002
++#define CONT_TYPE_VOICE  0x0100
++
++/* File System error number */
++
++#define PFS_ERR_NOPACK          1   /* no memory card is plugged or */
++#define PFS_ERR_NEW_PACK        2   /* ram pack has been changed to a different one */
++#define PFS_ERR_INCONSISTENT    3   /* need to run Pfschecker*/
++#define PFS_ERR_CONTRFAIL       CONT_OVERRUN_ERROR              
++#define PFS_ERR_INVALID         5   /* invalid parameter or file not exist*/
++#define PFS_ERR_BAD_DATA        6   /* the data read from pack are bad*/
++#define PFS_DATA_FULL           7   /* no free pages on ram pack*/
++#define PFS_DIR_FULL            8   /* no free directories on ram pack*/
++#define PFS_ERR_EXIST           9   /* file exists*/
++#define PFS_ERR_ID_FATAL        10  /* dead ram pack */
++#define PFS_ERR_DEVICE          11  /* wrong device type*/
++#define PFS_ERR_NO_GBCART       12  /* no gb cartridge (64GB-PAK) */
++#define PFS_ERR_NEW_GBCART      13  /* gb cartridge may be changed */
++
++/* File System size */
++
++#define PFS_INODE_SIZE_PER_PAGE 128
++#define PFS_FILE_NAME_LEN       16
++#define PFS_FILE_EXT_LEN        4
++#define PFS_BLOCKSIZE           32  /* bytes */
++#define PFS_ONE_PAGE            8   /* blocks */
++#define PFS_MAX_BANKS           62
++
++/* File System flag */
++
++#define PFS_READ                0
++#define PFS_WRITE               1
++#define PFS_CREATE              2
++
++/* File System status */
++
++#define PFS_INITIALIZED         0x1
++#define PFS_CORRUPTED           0x2
++#define PFS_ID_BROKEN           0x4
++#define PFS_MOTOR_INITIALIZED   0x8
++#define PFS_GBPAK_INITIALIZED   0x10
++
+ #define	M_GFXTASK	1
+ #define	M_AUDTASK	2
+ #define	M_VIDTASK	3
+@@ -235,6 +288,17 @@ typedef struct {
+     u8 banks;
+ } OSPfs;
+ 
++typedef struct {
++    u32 file_size;
++    u32 game_code;
++    char ext_name_0[2]; // insane layout due to ext_name starting on halfword boundary
++    u16 company_code;
++    char game_name_0[2];
++    char ext_name_1[2];
++    char game_name_1[12];
++    char padding[2];
++    char game_name_2[2];
++} OSPfsState; // size = 0x20
+ 
+ // Controller
+ 
+@@ -314,6 +378,24 @@ s32 osMotorStop(RDRAM_ARG PTR(OSPfs));
+ s32 osMotorStart(RDRAM_ARG PTR(OSPfs));
+ s32 __osMotorAccess(RDRAM_ARG PTR(OSPfs), s32);
+ 
++/* Controller PAK interface */
++
++s32 osPfsInitPak(RDRAM_ARG PTR(OSMesgQueue) queue, PTR(OSPfs) pfs, int channel);
++s32 osPfsRepairId(RDRAM_ARG PTR(OSPfs) pfs);
++s32 osPfsInit(RDRAM_ARG PTR(OSMesgQueue) queue, PTR(OSPfs) pfs, int channel);
++s32 osPfsReFormat(RDRAM_ARG PTR(OSPfs) pfs, PTR(OSMesgQueue) queue, int channel);
++s32 osPfsChecker(RDRAM_ARG PTR(OSPfs) pfs);
++s32 osPfsAllocateFile(RDRAM_ARG PTR(OSPfs) pfs, u16 company_code, u32 game_code, u8* game_name, u8* ext_name, int nbytes, PTR(s32) file_no);
++s32 osPfsFindFile(RDRAM_ARG PTR(OSPfs) pfs, u16 company_code, u32 game_code, u8* game_name, u8* ext_name, PTR(s32) file_no);
++s32 osPfsDeleteFile(RDRAM_ARG PTR(OSPfs) pfs, u16 company_code, u32 game_code, u8* game_name, u8* ext_name);
++s32 osPfsReadWriteFile(RDRAM_ARG PTR(OSPfs) pfs, s32 file_no, u8 flag, int offset, int nbytes, u8* data_buffer);
++s32 osPfsFileState(RDRAM_ARG PTR(OSPfs) pfs, s32 file_no, PTR(OSPfsState) state);
++s32 osPfsGetLabel(RDRAM_ARG PTR(OSPfs) pfs, u8* label, PTR(int) len);
++s32 osPfsSetLabel(RDRAM_ARG PTR(OSPfs) pfs, u8* label);
++s32 osPfsIsPlug(RDRAM_ARG PTR(OSMesgQueue) mq, u8* pattern);
++s32 osPfsFreeBlocks(RDRAM_ARG PTR(OSPfs) pfs, PTR(s32) bytes_not_used);
++s32 osPfsNumFiles(RDRAM_ARG PTR(OSPfs) pfs, PTR(s32) max_files, PTR(s32) files_used);
++
+ #ifdef __cplusplus
+ } // extern "C"
+ #endif
+diff --git a/librecomp/src/files.cpp b/ultramodern/src/files.cpp
+similarity index 74%
+rename from librecomp/src/files.cpp
+rename to ultramodern/src/files.cpp
+index af6f18d..0dd1a2f 100644
+--- a/librecomp/src/files.cpp
++++ b/ultramodern/src/files.cpp
+@@ -1,15 +1,15 @@
+-#include "files.hpp"
++#include <ultramodern/files.hpp>
+ 
+ constexpr std::u8string_view backup_suffix = u8".bak";
+ constexpr std::u8string_view temp_suffix = u8".temp";
+ 
+-std::ifstream recomp::open_input_backup_file(const std::filesystem::path& filepath, std::ios_base::openmode mode) {
++std::ifstream ultramodern::open_input_backup_file(const std::filesystem::path& filepath, std::ios_base::openmode mode) {
+     std::filesystem::path backup_path{filepath};
+     backup_path += backup_suffix;
+     return std::ifstream{backup_path, mode};
+ }
+ 
+-std::ifstream recomp::open_input_file_with_backup(const std::filesystem::path& filepath, std::ios_base::openmode mode) {
++std::ifstream ultramodern::open_input_file_with_backup(const std::filesystem::path& filepath, std::ios_base::openmode mode) {
+     std::ifstream ret{filepath, mode};
+ 
+     // Check if the file failed to open and open the corresponding backup file instead if so.
+@@ -20,7 +20,7 @@ std::ifstream recomp::open_input_file_with_backup(const std::filesystem::path& f
+     return ret;
+ }
+ 
+-std::ofstream recomp::open_output_file_with_backup(const std::filesystem::path& filepath, std::ios_base::openmode mode) {
++std::ofstream ultramodern::open_output_file_with_backup(const std::filesystem::path& filepath, std::ios_base::openmode mode) {
+     std::filesystem::path temp_path{filepath};
+     temp_path += temp_suffix;
+     std::ofstream temp_file_out{ temp_path, mode };
+@@ -28,7 +28,7 @@ std::ofstream recomp::open_output_file_with_backup(const std::filesystem::path&
+     return temp_file_out;
+ }
+ 
+-bool recomp::finalize_output_file_with_backup(const std::filesystem::path& filepath) {
++bool ultramodern::finalize_output_file_with_backup(const std::filesystem::path& filepath) {
+     std::filesystem::path backup_path{filepath};
+     backup_path += backup_suffix;
+ 
+diff --git a/ultramodern/src/input.cpp b/ultramodern/src/input.cpp
+index 8e86cb1..5d723c5 100644
+--- a/ultramodern/src/input.cpp
++++ b/ultramodern/src/input.cpp
+@@ -4,23 +4,28 @@
+ #include "ultramodern/ultra64.h"
+ #include "ultramodern/ultramodern.hpp"
+ 
+-#define PFS_ERR_NOPACK          1   // no device inserted
+-#define PFS_ERR_CONTRFAIL       4   // data transmission failure
+-#define PFS_ERR_INVALID         5   // invalid parameter or invalid file
+-#define PFS_ERR_DEVICE          11  // different type of device inserted
++#define MAXCONTROLLERS 4
+ 
+-#define PFS_INITIALIZED         1
+-#define PFS_CORRUPTED           2
+-#define PFS_ID_BROKEN           4
+-#define PFS_MOTOR_INITIALIZED   8
+-#define PFS_GBPAK_INITIALIZED   16
++static int max_controllers = 0;
+ 
+ static ultramodern::input::callbacks_t input_callbacks {};
+ 
++int ultramodern::get_max_controllers() {
++    return max_controllers;
++}
++
+ void ultramodern::input::set_callbacks(const callbacks_t& callbacks) {
+     input_callbacks = callbacks;
+ }
+ 
++ultramodern::input::connected_device_info_t ultramodern::get_connected_device_info(int channel) {
++    ultramodern::input::connected_device_info_t device_info{};
++    if (input_callbacks.get_connected_device_info != nullptr) {
++        device_info = input_callbacks.get_connected_device_info(channel);
++    }
++    return device_info;
++}
++
+ static std::chrono::high_resolution_clock::time_point input_poll_time;
+ 
+ static void update_poll_time() {
+@@ -33,16 +38,6 @@ void ultramodern::measure_input_latency() {
+ #endif
+ }
+ 
+-#define MAXCONTROLLERS 4
+-
+-#define CONT_NO_RESPONSE_ERROR 0x8
+-
+-#define CONT_TYPE_NORMAL 0x0005
+-#define CONT_TYPE_MOUSE  0x0002
+-#define CONT_TYPE_VOICE  0x0100
+-
+-static int max_controllers = 0;
+-
+ /* Plain controller */
+ 
+ static u16 get_controller_type(ultramodern::input::Device device_type) {
+@@ -69,12 +64,7 @@ static void __osContGetInitData(u8* pattern, OSContStatus *data) {
+     *pattern = 0x00;
+ 
+     for (int controller = 0; controller < max_controllers; controller++) {
+-        ultramodern::input::connected_device_info_t device_info{};
+-
+-        if (input_callbacks.get_connected_device_info != nullptr) {
+-            device_info = input_callbacks.get_connected_device_info(controller);
+-        }
+-
++        const auto device_info = ultramodern::get_connected_device_info(controller);
+         if (device_info.connected_device != ultramodern::input::Device::None) {
+             // Mark controller as present
+ 
+@@ -160,22 +150,18 @@ extern "C" void osContGetReadData(OSContPad *data) {
+     }
+ }
+ 
+-/* Rumble */
++/* RumblePak */
+ 
+-s32 osMotorInit(RDRAM_ARG PTR(OSMesgQueue) mq, PTR(OSPfs) pfs_, int channel) {
++extern "C" s32 osMotorInit(RDRAM_ARG PTR(OSMesgQueue) mq_, PTR(OSPfs) pfs_, int channel) {
+     OSPfs *pfs = TO_PTR(OSPfs, pfs_);
+ 
+     // basic initialization performed regardless of connected/disconnected status
+-    pfs->queue = mq;
++    pfs->queue = mq_;
+     pfs->channel = channel;
+     pfs->activebank = 0xFF;
+     pfs->status = 0;
+ 
+-    ultramodern::input::connected_device_info_t device_info{};
+-    if (input_callbacks.get_connected_device_info != nullptr) {
+-        device_info = input_callbacks.get_connected_device_info(channel);
+-    }
+-
++    const auto device_info = ultramodern::get_connected_device_info(channel);
+     if (device_info.connected_device != ultramodern::input::Device::Controller) {
+         return PFS_ERR_CONTRFAIL;
+     }
+@@ -190,15 +176,15 @@ s32 osMotorInit(RDRAM_ARG PTR(OSMesgQueue) mq, PTR(OSPfs) pfs_, int channel) {
+     return 0;
+ }
+ 
+-s32 osMotorStop(RDRAM_ARG PTR(OSPfs) pfs) {
++extern "C" s32 osMotorStop(RDRAM_ARG PTR(OSPfs) pfs) {
+     return __osMotorAccess(PASS_RDRAM pfs, false);
+ }
+ 
+-s32 osMotorStart(RDRAM_ARG PTR(OSPfs) pfs) {
++extern "C" s32 osMotorStart(RDRAM_ARG PTR(OSPfs) pfs) {
+     return __osMotorAccess(PASS_RDRAM pfs, true);
+ }
+ 
+-s32 __osMotorAccess(RDRAM_ARG PTR(OSPfs) pfs_, s32 flag) {
++extern "C" s32 __osMotorAccess(RDRAM_ARG PTR(OSPfs) pfs_, s32 flag) {
+     OSPfs *pfs = TO_PTR(OSPfs, pfs_);
+ 
+     if (!(pfs->status & PFS_MOTOR_INITIALIZED)) {
+diff --git a/ultramodern/src/pfs.cpp b/ultramodern/src/pfs.cpp
+new file mode 100644
+index 0000000..36ba29c
+--- /dev/null
++++ b/ultramodern/src/pfs.cpp
+@@ -0,0 +1,389 @@
++#include <array>
++#include <filesystem>
++#include <fstream>
++#include <ultramodern/save.hpp>
++#include <ultramodern/ultra64.h>
++
++#define ALIGN_UP(x, align) (((x) + ((align) - 1)) & ~((align) - 1))
++#define ARRLEN(x) (sizeof(x) / sizeof((x)[0]))
++#define DEF_DIR_PAGES 2
++#define MAX_FILES 16
++#define MAX_PAGES 123 // 128 total, 5 reserved for filesystem
++
++/* PFS Context */
++
++struct pfs_header_t { // same layout as OSPfsState, but non-byteswapped
++    uint32_t file_size;
++    uint32_t game_code;
++    uint16_t company_code;
++    std::array<char, PFS_FILE_EXT_LEN> ext_name;
++    std::array<char, PFS_FILE_NAME_LEN> game_name;
++    uint16_t padding;
++
++    pfs_header_t() = default;
++    pfs_header_t(uint32_t fs, uint32_t gc, uint16_t cc, const char* en, const char* gn)
++    : file_size{fs}, game_code{gc}, company_code{cc} {
++        std::memcpy(ext_name.data(), en, sizeof(ext_name));
++        std::memcpy(game_name.data(), gn, sizeof(game_name));
++    }
++    inline bool valid() const {
++        return game_code != 0 && company_code != 0;
++    }
++    inline bool compare(uint32_t gcode, uint16_t ccode, const char* ename, const char* gname) const {
++        return game_code == gcode && company_code == ccode &&
++            std::memcmp(ext_name.data(), ename, sizeof(ext_name)) == 0 &&
++            std::memcmp(game_name.data(), gname, sizeof(game_name)) == 0;
++    }
++};
++
++inline std::filesystem::path pfs_header_path() {
++    const auto filename = "controllerpak_header.bin";
++    return ultramodern::get_save_base_path() / filename;
++}
++
++inline std::filesystem::path pfs_file_path(size_t file_no) {
++    const auto filename = "controllerpak_file_" + std::to_string(file_no) + ".bin";
++    return ultramodern::get_save_base_path() / filename;
++}
++
++inline bool pfs_header_alloc() {
++    if (!std::filesystem::exists(pfs_header_path())) {
++        std::vector<char> zero_block(MAX_FILES * sizeof(pfs_header_t));
++        std::ofstream out(pfs_header_path(), std::ios::binary | std::ios::out | std::ios::trunc);
++        out.write(zero_block.data(), zero_block.size());
++        return out.good();
++    }
++    return true;
++}
++
++inline bool pfs_header_write(int file_no, const pfs_header_t& hdr) {
++    std::fstream out(pfs_header_path(), std::ios::binary | std::ios::out | std::ios::in);
++    if (out.is_open() && out.good()) {
++        out.seekp(file_no * sizeof(pfs_header_t), std::ios::beg);
++        out.write((const char*)&hdr.file_size, sizeof(hdr.file_size));
++        out.write((const char*)&hdr.game_code, sizeof(hdr.game_code));
++        out.write((const char*)&hdr.company_code, sizeof(hdr.company_code));
++        out.write((const char*)&hdr.ext_name[0], hdr.ext_name.size());
++        out.write((const char*)&hdr.game_name[0], hdr.game_name.size());
++        out.write((const char*)&hdr.padding, sizeof(hdr.padding));
++    }
++    return out.good();
++}
++
++inline bool pfs_header_read(int file_no, pfs_header_t& hdr) {
++    hdr = {}; // reset
++    std::ifstream in(pfs_header_path(), std::ios::binary | std::ios::in);
++    if (in.is_open() && in.good()) {
++        in.seekg(file_no * sizeof(pfs_header_t), std::ios::beg);
++        in.read((char*)&hdr.file_size, sizeof(hdr.file_size));
++        in.read((char*)&hdr.game_code, sizeof(hdr.game_code));
++        in.read((char*)&hdr.company_code, sizeof(hdr.company_code));
++        in.read((char*)&hdr.ext_name[0], hdr.ext_name.size());
++        in.read((char*)&hdr.game_name[0], hdr.game_name.size());
++        in.read((char*)&hdr.padding, sizeof(hdr.padding));
++    }
++    return in.good();
++}
++
++inline bool pfs_file_alloc(int file_no, int nbytes) {
++    std::vector<char> zero_block(ALIGN_UP(nbytes, PFS_ONE_PAGE * PFS_BLOCKSIZE));
++    std::ofstream out(pfs_file_path(file_no), std::ios::binary | std::ios::out | std::ios::trunc);
++    if (out.is_open() && out.good()) {
++        out.write(zero_block.data(), zero_block.size());
++    }
++    return out.good();
++}
++
++inline bool pfs_file_write(int file_no, int offset, const char* data_buffer, int nbytes) {
++    std::fstream out(pfs_file_path(file_no), std::ios::binary | std::ios::out | std::ios::in);
++    if (out.is_open() && out.good()) {
++        out.seekp(offset, std::ios::beg);
++        out.write((const char*)data_buffer, nbytes);
++    }
++    return out.good();
++}
++
++inline bool pfs_file_read(int file_no, int offset, char* data_buffer, int nbytes) {
++    std::ifstream in(pfs_file_path(file_no), std::ios::binary | std::ios::in);
++    if (in.is_open() && in.good()) {
++        in.seekg(offset, std::ios::beg);
++        in.read((char*)data_buffer, nbytes);
++    }
++    return in.good();
++}
++
++/* ControllerPak */
++
++static s32 __osPfsGetStatus(RDRAM_ARG PTR(OSMesgQueue) queue, int channel) {
++    const auto device_info = ultramodern::get_connected_device_info(channel);
++    if (device_info.connected_device != ultramodern::input::Device::Controller) {
++        return PFS_ERR_CONTRFAIL;
++    }
++    if (device_info.connected_pak == ultramodern::input::Pak::None) {
++        return PFS_ERR_NOPACK;
++    }
++    if (device_info.connected_pak != ultramodern::input::Pak::ControllerPak) {
++        return PFS_ERR_DEVICE;
++    }
++
++    pfs_header_alloc();
++    return 0;
++}
++
++static s32 __osGetId(RDRAM_ARG PTR(OSPfs) pfs_) {
++    OSPfs* pfs = TO_PTR(OSPfs, pfs_);
++
++    // we don't implement the real filesystem, so just mimic initialization
++    pfs->version = 0;
++    pfs->banks = 1;
++    pfs->activebank = 0;
++    pfs->inode_start_page = 1 + DEF_DIR_PAGES + (2 * pfs->banks);
++    pfs->dir_size = DEF_DIR_PAGES * PFS_ONE_PAGE;
++    pfs->inode_table = 1 * PFS_ONE_PAGE;
++    pfs->minode_table = (1 + pfs->banks) * PFS_ONE_PAGE;
++    pfs->dir_table = pfs->minode_table + (pfs->banks * PFS_ONE_PAGE);
++
++    std::memset(pfs->id, 0, ARRLEN(pfs->id));
++    std::memset(pfs->label, 0, ARRLEN(pfs->label));
++    return 0;
++}
++
++extern "C" s32 osPfsInitPak(RDRAM_ARG PTR(OSMesgQueue) mq_, PTR(OSPfs) pfs_, int channel) {
++    OSPfs* pfs = TO_PTR(OSPfs, pfs_);
++
++    const auto status = __osPfsGetStatus(PASS_RDRAM mq_, channel);
++    if (status != 0) {
++        return status;
++    }
++
++    pfs->queue = mq_;
++    pfs->channel = channel;
++    pfs->status = 0;
++    __osGetId(PASS_RDRAM pfs_);
++
++    const s32 ret = osPfsChecker(PASS_RDRAM pfs_);
++    pfs->status |= PFS_INITIALIZED;
++    return ret;
++}
++
++extern "C" s32 osPfsRepairId(RDRAM_ARG PTR(OSPfs) pfs) {
++    return 0;
++}
++
++extern "C" s32 osPfsInit(RDRAM_ARG PTR(OSMesgQueue) mq_, PTR(OSPfs) pfs_, int channel) {
++    OSPfs* pfs = TO_PTR(OSPfs, pfs_);
++
++    const auto status = __osPfsGetStatus(PASS_RDRAM mq_, channel);
++    if (status != 0) {
++        return status;
++    }
++
++    pfs->queue = mq_;
++    pfs->channel = channel;
++    pfs->status = 0;
++    pfs->activebank = -1;
++    __osGetId(PASS_RDRAM pfs_);
++
++    const s32 ret = osPfsChecker(PASS_RDRAM pfs_);
++    pfs->status |= PFS_INITIALIZED;
++    return ret;
++}
++
++extern "C" s32 osPfsReFormat(RDRAM_ARG PTR(OSPfs) pfs, PTR(OSMesgQueue) mq_, int channel) {
++    return 0;
++}
++
++extern "C" s32 osPfsChecker(RDRAM_ARG PTR(OSPfs) pfs) {
++    return 0;
++}
++
++extern "C" s32 osPfsAllocateFile(RDRAM_ARG PTR(OSPfs) pfs, u16 company_code, u32 game_code, u8* game_name, u8* ext_name, int nbytes, PTR(s32) file_no_) {
++    s32* file_no = TO_PTR(s32, file_no_);
++
++    if (company_code == 0 || game_code == 0) {
++        return PFS_ERR_INVALID;
++    }
++
++    pfs_header_t hdr{};
++    u8 free_file_index = 0;
++    for (size_t i = 0; i < MAX_FILES; i++) {
++        pfs_header_read(i, hdr);
++        if (!hdr.valid()) {
++            free_file_index = i;
++            break;
++        }
++    }
++
++    if (free_file_index == MAX_FILES) {
++        return PFS_DIR_FULL;
++    }
++    if (!pfs_header_write(free_file_index, pfs_header_t{(uint32_t)nbytes, game_code, company_code, (char*)ext_name, (char*)game_name})) {
++        return PFS_ERR_INVALID;
++    }
++    if (!pfs_file_alloc(free_file_index, nbytes)) {
++        return PFS_ERR_INVALID;
++    }
++    *file_no = free_file_index;
++    return 0;
++}
++
++extern "C" s32 osPfsFindFile(RDRAM_ARG PTR(OSPfs) pfs_, u16 company_code, u32 game_code, u8* game_name, u8* ext_name, PTR(s32) file_no_) {
++    s32* file_no = TO_PTR(s32, file_no_);
++
++    if (company_code == 0 || game_code == 0) {
++        return PFS_ERR_INVALID;
++    }
++
++    pfs_header_t hdr{};
++    for (size_t i = 0; i < MAX_FILES; i++) {
++        pfs_header_read(i, hdr);
++        if (hdr.compare(game_code, company_code, (char*)ext_name, (char*)game_name)) {
++            *file_no = i;
++            return 0;
++        }
++    }
++    return PFS_ERR_INVALID;
++}
++
++extern "C" s32 osPfsDeleteFile(RDRAM_ARG PTR(OSPfs) pfs_, u16 company_code, u32 game_code, u8* game_name, u8* ext_name) {
++    if (company_code == 0 || game_code == 0) {
++        return PFS_ERR_INVALID;
++    }
++
++    pfs_header_t hdr{};
++    for (int i = 0; i < MAX_FILES; i++) {
++        pfs_header_read(i, hdr);
++        if (hdr.compare(game_code, company_code, (char*)ext_name, (char*)game_name)) {
++            pfs_header_write(i, pfs_header_t{});
++            std::filesystem::remove(pfs_file_path(i));
++            return 0;
++        }
++    }
++    return PFS_ERR_INVALID;
++}
++
++extern "C" s32 osPfsReadWriteFile(RDRAM_ARG PTR(OSPfs) pfs_, s32 file_no, u8 flag, int offset, int nbytes, u8* data_buffer) {
++    if (!std::filesystem::exists(pfs_file_path(file_no))) {
++        return PFS_ERR_INVALID;
++    }
++
++    const auto file_size = std::filesystem::file_size(pfs_file_path(file_no));
++    if (offset % PFS_BLOCKSIZE || nbytes % PFS_BLOCKSIZE || (offset + nbytes) > file_size) {
++        return PFS_ERR_INVALID;
++    }
++    else if ((flag == PFS_READ) && !pfs_file_read(file_no, offset, (char*)data_buffer, nbytes)) {
++        return PFS_ERR_INVALID;
++    }
++    else if ((flag == PFS_WRITE) && !pfs_file_write(file_no, offset, (const char*)data_buffer, nbytes)) {
++        return PFS_ERR_INVALID;
++    }
++    return 0;
++}
++
++inline void bswap_copy(char* dst, const char* src, int offset, int n) {
++    for (int i = 0; i < n; i++) { dst[(i + offset) ^ 3] = src[i + offset]; }
++}
++
++extern "C" s32 osPfsFileState(RDRAM_ARG PTR(OSPfs) pfs_, s32 file_no, PTR(OSPfsState) state_) {
++    OSPfsState *state = TO_PTR(OSPfsState, state_);
++
++    if (!std::filesystem::exists(pfs_file_path(file_no))) {
++        return PFS_ERR_INVALID;
++    }
++
++    pfs_header_t hdr{};
++    pfs_header_read(file_no, hdr);
++
++    state->file_size = hdr.file_size;
++    state->company_code = hdr.company_code;
++    state->game_code = hdr.game_code;
++
++    // FIXME OSPfsState layout is an absoute mess. giving up and byte swapping
++    bswap_copy((char*)state, (char*)&hdr, 10, 20);
++    return 0;
++}
++
++extern "C" s32 osPfsGetLabel(RDRAM_ARG PTR(OSPfs) pfs_, u8* label, PTR(int) len_) {
++    OSPfs* pfs = TO_PTR(OSPfs, pfs_);
++    int* len = TO_PTR(int, len_);
++
++    if (label == NULL) {
++        return PFS_ERR_INVALID;
++    }
++//  if (__osCheckId(pfs) == PFS_ERR_NEW_PACK) {
++//      return PFS_ERR_NEW_PACK;
++//  }
++
++    int i;
++    for (i = 0; i < ARRLEN(pfs->label); i++) {
++        if (pfs->label[i] == 0) {
++            break;
++        }
++        *label++ = pfs->label[i];
++    }
++    *len = i;
++    return 0;
++}
++
++extern "C" s32 osPfsSetLabel(RDRAM_ARG PTR(OSPfs) pfs_, u8* label) {
++    OSPfs* pfs = TO_PTR(OSPfs, pfs_);
++
++    if (label != NULL) {
++        for (int i = 0; i < ARRLEN(pfs->label); i++) {
++            if (*label == 0) {
++                break;
++            }
++            pfs->label[i] = *label++;
++        }
++    }
++    return 0;
++}
++
++extern "C" s32 osPfsIsPlug(RDRAM_ARG PTR(OSMesgQueue) mq_, u8* pattern) {
++    u8 bits = 0;
++
++    for (int channel = 0; channel < ultramodern::get_max_controllers(); channel++) {
++        if (__osPfsGetStatus(PASS_RDRAM mq_, channel) == 0) {
++            bits |= (1 << channel);
++        }
++    }
++    *pattern = bits;
++    return 0;
++}
++
++extern "C" s32 osPfsFreeBlocks(RDRAM_ARG PTR(OSPfs) pfs_, PTR(s32) bytes_not_used_) {
++    OSPfs *pfs = TO_PTR(OSPfs, pfs_);
++    s32 *bytes_not_used = TO_PTR(s32, bytes_not_used_);
++
++    s32 pages_used = 0;
++    pfs_header_t hdr{};
++    for (size_t i = 0; i < MAX_FILES; i++) {
++        pfs_header_read(i, hdr);
++        if (hdr.valid()) {
++            pages_used += hdr.file_size >> 8;
++        }
++    }
++
++    *bytes_not_used = (MAX_PAGES - pages_used) << 8;
++    return 0;
++}
++
++extern "C" s32 osPfsNumFiles(RDRAM_ARG PTR(OSPfs) pfs_, PTR(s32) max_files_, PTR(s32) files_used_) {
++    OSPfs *pfs = TO_PTR(OSPfs, pfs_);
++    s32 *max_files = TO_PTR(s32, max_files_);
++    s32 *files_used = TO_PTR(s32, files_used_);
++
++    u8 num_files = 0;
++    pfs_header_t hdr{};
++    for (size_t i = 0; i < MAX_FILES; i++) {
++        pfs_header_read(i, hdr);
++        if (hdr.valid()) {
++            num_files++;
++        }
++    }
++
++    *max_files = MAX_FILES;
++    *files_used = num_files;
++    return 0;
++}
++
+diff --git a/ultramodern/src/save.cpp b/ultramodern/src/save.cpp
+new file mode 100644
+index 0000000..9a216f4
+--- /dev/null
++++ b/ultramodern/src/save.cpp
+@@ -0,0 +1,212 @@
++#include <filesystem>
++#include <mutex>
++#include <thread>
++#include <vector>
++#include <ultramodern/files.hpp>
++#include <ultramodern/save.hpp>
++#include <ultramodern/ultramodern.hpp>
++
++struct {
++    std::vector<char> save_buffer;
++    std::thread saving_thread;
++    std::filesystem::path save_base_path;
++    std::filesystem::path save_file_path;
++    moodycamel::LightweightSemaphore write_sempahore;
++    // Used to tell the saving thread that a file swap is pending.
++    moodycamel::LightweightSemaphore swap_file_pending_sempahore;
++    // Used to tell the consumer thread that the saving thread is ready for a file swap.
++    moodycamel::LightweightSemaphore swap_file_ready_sempahore;
++    std::mutex save_buffer_mutex;
++} save_context;
++
++// The current game's save directory within the config path.
++const std::u8string save_folder = u8"saves";
++
++// The current game's config directory path.
++extern std::filesystem::path config_path;
++
++// The current game's save type.
++ultramodern::SaveType save_type = ultramodern::SaveType::None;
++
++void ultramodern::set_save_type(ultramodern::SaveType type) {
++    save_type = type;
++}
++
++ultramodern::SaveType ultramodern::get_save_type() {
++    return save_type;
++}
++
++bool ultramodern::eeprom_allowed() {
++    return
++        save_type == SaveType::Eep4k || 
++        save_type == SaveType::Eep16k ||
++        save_type == SaveType::AllowAll;
++}
++
++bool ultramodern::sram_allowed() {
++    return
++        save_type == SaveType::Sram || 
++        save_type == SaveType::AllowAll;
++}
++
++bool ultramodern::flashram_allowed() {
++    return
++        save_type == SaveType::Flashram || 
++        save_type == SaveType::AllowAll;
++}
++
++std::filesystem::path ultramodern::get_save_base_path() {
++    return save_context.save_base_path;
++}
++
++std::filesystem::path ultramodern::get_save_file_path() {
++    return save_context.save_file_path;
++}
++
++void ultramodern::set_save_file_path(const std::u8string& subfolder, const std::u8string& name) {
++    save_context.save_base_path = config_path / save_folder;
++    if (!subfolder.empty()) {
++        save_context.save_base_path = save_context.save_base_path / subfolder;
++    }
++    save_context.save_file_path = save_context.save_base_path / (name + u8".bin");
++}
++
++void update_save_file() {
++    bool saving_failed = false;
++    {
++        std::ofstream save_file = ultramodern::open_output_file_with_backup(ultramodern::get_save_file_path(), std::ios_base::binary);
++
++        if (save_file.good()) {
++            std::lock_guard lock{ save_context.save_buffer_mutex };
++            save_file.write(save_context.save_buffer.data(), save_context.save_buffer.size());
++        }
++        else {
++            saving_failed = true;
++        }
++    }
++    if (!saving_failed) {
++        saving_failed = !ultramodern::finalize_output_file_with_backup(ultramodern::get_save_file_path());
++    }
++    if (saving_failed) {
++        ultramodern::error_handling::message_box("Failed to write to the save file. Check your file permissions and whether the save folder has been moved to Dropbox or similar, as this can cause issues.");
++    }
++}
++
++extern std::atomic_bool exited;
++
++void saving_thread_func(RDRAM_ARG1) {
++    while (!exited) {
++        bool save_buffer_updated = false;
++        // Repeatedly wait for a new action to be sent.
++        constexpr int64_t wait_time_microseconds = 10000;
++        constexpr int max_actions = 128;
++        int num_actions = 0;
++
++        // Wait up to the given timeout for a write to come in. Allow multiple writes to coalesce together into a single save.
++        // Cap the number of coalesced writes to guarantee that the save buffer eventually gets written out to the file even if the game
++        // is constantly sending writes.
++        while (save_context.write_sempahore.wait(wait_time_microseconds) && num_actions < max_actions) {
++            save_buffer_updated = true;
++            num_actions++;
++        }
++
++        // If an action came through that affected the save file, save the updated contents.
++        if (save_buffer_updated) {
++            update_save_file();
++        }
++
++        if (save_context.swap_file_pending_sempahore.tryWait()) {
++            save_context.swap_file_ready_sempahore.signal();
++        }
++    }
++}
++
++void ultramodern::save_write_ptr(const void* in, uint32_t offset, uint32_t count) {
++    assert(offset + count <= save_context.save_buffer.size());
++
++    {
++        std::lock_guard lock { save_context.save_buffer_mutex };
++        memcpy(&save_context.save_buffer[offset], in, count);
++    }
++    
++    save_context.write_sempahore.signal();
++}
++
++void ultramodern::save_read_ptr(void *out, uint32_t offset, uint32_t count) {
++    assert(offset + count <= save_context.save_buffer.size());
++
++    std::lock_guard lock { save_context.save_buffer_mutex };
++    std::memcpy(out, &save_context.save_buffer[offset], count);
++}
++
++void ultramodern::save_clear(uint32_t start, uint32_t size, char value) {
++    assert(start + size < save_context.save_buffer.size());
++
++    {
++        std::lock_guard lock { save_context.save_buffer_mutex };
++        std::fill_n(save_context.save_buffer.begin() + start, size, value);
++    }
++
++    save_context.write_sempahore.signal();
++}
++
++size_t ultramodern::get_save_size(ultramodern::SaveType save_type) {
++    switch (save_type) {
++        case ultramodern::SaveType::AllowAll:
++        case ultramodern::SaveType::Flashram:
++            return 0x20000;
++        case ultramodern::SaveType::Sram:
++            return 0x8000;
++        case ultramodern::SaveType::Eep16k:
++            return 0x800;
++        case ultramodern::SaveType::Eep4k:
++            return 0x200;
++        case ultramodern::SaveType::None:
++            return 0;
++    }
++    return 0;
++}
++
++void read_save_file() {
++    std::filesystem::path save_file_path = ultramodern::get_save_file_path();
++
++    // Ensure the save file directory exists.
++    std::filesystem::create_directories(save_file_path.parent_path());
++
++    // Read the save file if it exists.
++    std::ifstream save_file = ultramodern::open_input_file_with_backup(save_file_path, std::ios_base::binary);
++    if (save_file.good()) {
++        save_file.read(save_context.save_buffer.data(), save_context.save_buffer.size());
++    }
++    else {
++        // Otherwise clear the save file to all zeroes.
++        std::fill(save_context.save_buffer.begin(), save_context.save_buffer.end(), 0);
++    }
++}
++
++void ultramodern::init_saving(RDRAM_ARG const std::u8string& name) {
++    set_save_file_path(u8"", name);
++
++    save_context.save_buffer.resize(get_save_size(ultramodern::get_save_type()));
++
++    read_save_file();
++
++    save_context.saving_thread = std::thread{saving_thread_func, PASS_RDRAM};
++}
++
++void ultramodern::change_save_file(const std::u8string& subfolder, const std::u8string& name) {
++    // Tell the saving thread that a file swap is pending.
++    save_context.swap_file_pending_sempahore.signal();
++    // Wait until the saving thread indicates it's ready to swap files.
++    save_context.swap_file_ready_sempahore.wait();
++    // Perform the save file swap.
++    set_save_file_path(subfolder, name);
++    read_save_file();
++}
++
++void ultramodern::join_saving_thread() {
++    if (save_context.saving_thread.joinable()) {
++        save_context.saving_thread.join();
++    }
++}
++

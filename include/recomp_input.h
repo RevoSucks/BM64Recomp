@@ -102,11 +102,25 @@ namespace recomp {
         {recomp::ControllerPortMode::Controller, "Controller"}
     });
 
+    enum class PakType {
+        ControllerPak,
+        RumblePak,
+        OptionCount
+    };
+
+    NLOHMANN_JSON_SERIALIZE_ENUM(recomp::PakType, {
+        {recomp::PakType::ControllerPak, "ControllerPak"},
+        {recomp::PakType::RumblePak, "RumblePak"}
+    });
+
     constexpr int max_ports = 4;
 
     ControllerPortMode get_port_mode(int port);
     void set_port_mode(int port, ControllerPortMode mode);
     int get_port_count();
+
+    PakType get_port_pak_type(int port);
+    void set_port_pak_type(int port, PakType type);
 
     void start_scanning_input(InputDevice device);
     void stop_scanning_input();

@@ -81,6 +81,26 @@
                     <div class="button__label">Reset to defaults</div>
                 </button>
             </div>
+            <!-- Pak type selector -->
+            <div class="config__header" style="justify-content: center; gap: 8dp; margin-bottom: 4dp; align-items: center;">
+                <label style="margin-right: 4dp; opacity: 0.7;">Pak:</label>
+                <button
+                    class="button"
+                    data-class-button--success="pak_type == 'Controller Pak'"
+                    data-event-click="set_pak_type('ControllerPak')"
+                    data-attr-style="pak_type == 'Controller Pak' ? 'min-width: 100dp; opacity: 1.0;' : 'min-width: 100dp; opacity: 0.5;'"
+                >
+                    <div class="button__label">Controller Pak</div>
+                </button>
+                <button
+                    class="button"
+                    data-class-button--success="pak_type == 'Rumble Pak'"
+                    data-event-click="set_pak_type('RumblePak')"
+                    data-attr-style="pak_type == 'Rumble Pak' ? 'min-width: 100dp; opacity: 1.0;' : 'min-width: 100dp; opacity: 0.5;'"
+                >
+                    <div class="button__label">Rumble Pak</div>
+                </button>
+            </div>
             <div class="config__wrapper input-config">
                 <div class="input-config__horizontal-split">
                     <div class="input-config__mappings" data-event-mouseout="set_input_row_focus(-1)">

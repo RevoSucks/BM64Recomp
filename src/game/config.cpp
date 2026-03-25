@@ -4,7 +4,7 @@
 #include "zelda_render.h"
 #include "zelda_support.h"
 #include "ultramodern/config.hpp"
-#include "librecomp/files.hpp"
+#include "ultramodern/files.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -208,7 +208,7 @@ bool read_json_with_backups(const std::filesystem::path& path, nlohmann::json& j
     }
 
     // Try reading and parsing the backup file.
-    if (read_json(recomp::open_input_backup_file(path), json_out)) {
+    if (read_json(ultramodern::open_input_backup_file(path), json_out)) {
         return true;
     }
 
@@ -218,14 +218,14 @@ bool read_json_with_backups(const std::filesystem::path& path, nlohmann::json& j
 
 bool save_json_with_backups(const std::filesystem::path& path, const nlohmann::json& json_data) {
     {
-        std::ofstream output_file = recomp::open_output_file_with_backup(path);
+        std::ofstream output_file = ultramodern::open_output_file_with_backup(path);
         if (!output_file.good()) {
             return false;
         }
 
         output_file << std::setw(4) << json_data;
     }
-    return recomp::finalize_output_file_with_backup(path);
+    return ultramodern::finalize_output_file_with_backup(path);
 }
 
 bool save_general_config(const std::filesystem::path& path) {
@@ -407,8 +407,9 @@ bool save_controls_config(const std::filesystem::path& path) {
     for (int p = 0; p < recomp::max_ports; p++) {
         nlohmann::json port_json{};
 
-        // Save mode
+        // Save mode and pak type
         recomp::to_json(port_json["mode"], recomp::get_port_mode(p));
+        recomp::to_json(port_json["pak_type"], recomp::get_port_pak_type(p));
 
         // Save bindings
         port_json["keyboard"] = {};
@@ -481,10 +482,12 @@ bool load_controls_config(const std::filesystem::path& path) {
         for (int p = 0; p < recomp::max_ports && p < (int)ports_array.size(); p++) {
             const nlohmann::json& port_json = ports_array[p];
 
-            // Load mode
+            // Load mode and pak type
             recomp::ControllerPortMode mode = from_or_default(port_json, "mode",
                 p == 0 ? recomp::ControllerPortMode::Keyboard : recomp::ControllerPortMode::Off);
             recomp::set_port_mode(p, mode);
+            recomp::PakType pak_type = from_or_default(port_json, "pak_type", recomp::PakType::ControllerPak);
+            recomp::set_port_pak_type(p, pak_type);
 
             // Load bindings
             if (!load_input_device_from_json(port_json, recomp::InputDevice::Keyboard, "keyboard", p)) {
