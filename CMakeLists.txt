@@ -75,6 +75,29 @@ SET(RMLUI_TESTS_ENABLED OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/RmlUi)
 target_compile_definitions(rmlui_core PRIVATE LUNASVG_BUILD_STATIC)
 
+# Apply controller pak patch to N64ModernRuntime if not already applied.
+# Source: https://github.com/gcsmith/N64ModernRuntime/tree/controller_pak
+execute_process(
+    COMMAND git apply --check ${CMAKE_SOURCE_DIR}/patches/n64modernruntime-controller-pak.patch
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime
+    RESULT_VARIABLE PATCH_CHECK_RESULT
+    OUTPUT_QUIET
+    ERROR_QUIET
+)
+if (PATCH_CHECK_RESULT EQUAL 0)
+    execute_process(
+        COMMAND git apply ${CMAKE_SOURCE_DIR}/patches/n64modernruntime-controller-pak.patch
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime
+        RESULT_VARIABLE PATCH_APPLY_RESULT
+    )
+    if (NOT PATCH_APPLY_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to apply N64ModernRuntime controller pak patch")
+    endif()
+    message(STATUS "Applied N64ModernRuntime controller pak patch")
+else()
+    message(STATUS "N64ModernRuntime controller pak patch already applied (or conflicts exist)")
+endif()
+
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime)
 
 target_include_directories(rt64 PRIVATE ${CMAKE_BINARY_DIR}/rt64/src)
