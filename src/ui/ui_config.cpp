@@ -96,6 +96,19 @@ static int scanned_input_index = -1;
 static int focused_input_index = -1;
 static int focused_config_option_index = -1;
 static int selected_port = 0;
+static int port_mode_index = 0; // 0=Off, 1=Keyboard, 2=Controller
+static int port_controller_index = -1;
+static std::vector<std::string> connected_controller_names;
+
+static void refresh_controller_list() {
+    connected_controller_names = recomp::get_connected_controller_names();
+    if (connected_controller_names.empty()) {
+        connected_controller_names.push_back("No controller detected");
+        port_controller_index = 0;
+    } else {
+        port_controller_index = recomp::get_port_controller_index(selected_port);
+    }
+}
 
 static bool msaa2x_supported = false;
 static bool msaa4x_supported = false;
@@ -499,6 +512,12 @@ class ConfigTabsetListener : public Rml::EventListener {
     void ProcessEvent(Rml::Event& event) override {
         if (event.GetId() == Rml::EventId::Tabchange) {
             int tab_index = event.GetParameter<int>("tab_index", 0);
+            // Refresh controller list when switching to controls tab
+            if (tab_index == recompui::config_tab_to_index(recompui::ConfigTab::Controls)) {
+                refresh_controller_list();
+                controls_model_handle.DirtyVariable("connected_controller_names");
+                controls_model_handle.DirtyVariable("port_controller_index");
+            }
             bool in_mod_tab = (tab_index == recompui::config_tab_to_index(recompui::ConfigTab::Mods));
             if (in_mod_tab) {
                 recompui::set_config_tabset_mod_nav();
@@ -570,15 +589,16 @@ public:
                 zelda64::open_quit_game_prompt();
             });
 
-        recompui::register_event(listener, "toggle_input_device",
+        recompui::register_event(listener, "port_controller_changed",
             [](const std::string& param, Rml::Event& event) {
-                cur_device = cur_device == recomp::InputDevice::Controller
-                    ? recomp::InputDevice::Keyboard
-                    : recomp::InputDevice::Controller;
-                controls_model_handle.DirtyVariable("input_device_is_keyboard");
-                controls_model_handle.DirtyVariable("inputs");
+                int value = event.GetParameter<int>("value", -1);
+                recomp::assign_controller_to_port(selected_port, value);
+                port_controller_index = value;
+                controls_model_handle.DirtyVariable("port_controller_index");
+                controls_model_handle.DirtyVariable("assigned_controller_name");
+                zelda64::save_config();
             });
-            
+
         recompui::register_event(listener, "area_index_changed",
             [](const std::string& param, Rml::Event& event) {
                 debug_context.area_index = event.GetParameter<int>("value", 0);
@@ -747,6 +767,7 @@ public:
             return Rml::Variant{recomp::get_input_enum_name(static_cast<recomp::GameInput>(inputs.at(0).Get<size_t>()))};
         });
 
+
         constructor.BindEventCallback("set_input_binding",
             [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
                 scanned_input_index = inputs.at(0).Get<size_t>();
@@ -758,11 +779,17 @@ public:
 
         constructor.BindEventCallback("reset_input_bindings_to_defaults",
             [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
-                if (cur_device == recomp::InputDevice::Controller) {
-                    zelda64::reset_cont_input_bindings(selected_port);
-                } else {
-                    zelda64::reset_kb_input_bindings(selected_port);
+                // Reset all ports: P1 = Keyboard, P2-P4 = Off
+                recomp::set_port_mode(0, recomp::ControllerPortMode::Keyboard);
+                for (int p = 1; p < recomp::max_ports; p++) {
+                    recomp::set_port_mode(p, recomp::ControllerPortMode::Off);
                 }
+                zelda64::reset_input_bindings();
+                selected_port = 0;
+                cur_device = recomp::InputDevice::Keyboard;
+                port_mode_index = static_cast<int>(recomp::ControllerPortMode::Keyboard);
+                refresh_controller_list();
+                zelda64::save_config();
                 model_handle.DirtyAllVariables();
                 nav_help_model_handle.DirtyVariable("nav_help__accept");
                 nav_help_model_handle.DirtyVariable("nav_help__exit");
@@ -791,10 +818,16 @@ public:
         constructor.BindEventCallback("select_port",
             [](Rml::DataModelHandle model_handle, Rml::Event& event, const Rml::VariantList& inputs) {
                 selected_port = inputs.at(0).Get<int>();
-                model_handle.DirtyVariable("selected_port");
-                model_handle.DirtyVariable("port_mode");
-                model_handle.DirtyVariable("assigned_controller_name");
-                model_handle.DirtyVariable("inputs");
+                recomp::ControllerPortMode mode = recomp::get_port_mode(selected_port);
+                port_mode_index = static_cast<int>(mode);
+                // Sync cur_device with the selected port's mode
+                if (mode == recomp::ControllerPortMode::Controller) {
+                    cur_device = recomp::InputDevice::Controller;
+                } else {
+                    cur_device = recomp::InputDevice::Keyboard;
+                }
+                refresh_controller_list();
+                model_handle.DirtyAllVariables();
             });
 
         constructor.BindEventCallback("set_port_mode",
@@ -804,8 +837,23 @@ public:
                 if (mode_str == "Keyboard") mode = recomp::ControllerPortMode::Keyboard;
                 else if (mode_str == "Controller") mode = recomp::ControllerPortMode::Controller;
                 recomp::set_port_mode(selected_port, mode);
-                model_handle.DirtyVariable("port_mode");
-                model_handle.DirtyVariable("assigned_controller_name");
+                port_mode_index = static_cast<int>(mode);
+                // Sync cur_device with the new mode
+                if (mode == recomp::ControllerPortMode::Controller) {
+                    cur_device = recomp::InputDevice::Controller;
+                } else {
+                    cur_device = recomp::InputDevice::Keyboard;
+                }
+                // Auto-assign first available controller when switching to Controller mode
+                if (mode == recomp::ControllerPortMode::Controller && recomp::get_port_controller_index(selected_port) < 0) {
+                    auto names = recomp::get_connected_controller_names();
+                    if (!names.empty()) {
+                        recomp::assign_controller_to_port(selected_port, 0);
+                    }
+                }
+                refresh_controller_list();
+                model_handle.DirtyAllVariables();
+                zelda64::save_config();
             });
 
         constructor.BindEventCallback("set_input_row_focus",
@@ -911,6 +959,10 @@ public:
 
         constructor.Bind<int>("active_binding_slot", &scanned_binding_index);
         constructor.Bind<int>("selected_port", &selected_port);
+        constructor.Bind<int>("port_mode_index", &port_mode_index);
+        constructor.Bind<int>("port_controller_index", &port_controller_index);
+        constructor.RegisterArray<std::vector<std::string>>();
+        constructor.Bind("connected_controller_names", &connected_controller_names);
 
         constructor.BindFunc("port_mode", [](Rml::Variant& out) {
             recomp::ControllerPortMode mode = recomp::get_port_mode(selected_port);
@@ -926,7 +978,27 @@ public:
             out = recomp::get_port_controller_name(selected_port);
         });
 
+        constructor.BindFunc("is_multiplayer_port", [](Rml::Variant& out) {
+            out = selected_port > 0;
+        });
+
+        auto make_port_style = [](int port) -> std::string {
+            bool is_selected = (selected_port == port);
+            bool is_active = recomp::get_port_mode(port) != recomp::ControllerPortMode::Off;
+            if (is_selected) {
+                return "min-width: 48dp; opacity: 1.0;";
+            } else if (is_active) {
+                return "min-width: 48dp; opacity: 0.7;";
+            } else {
+                return "min-width: 48dp; opacity: 0.3;";
+            }
+        };
+        constructor.BindFunc("port_0_style", [make_port_style](Rml::Variant& out) { out = make_port_style(0); });
+        constructor.BindFunc("port_1_style", [make_port_style](Rml::Variant& out) { out = make_port_style(1); });
+        constructor.BindFunc("port_2_style", [make_port_style](Rml::Variant& out) { out = make_port_style(2); });
+        constructor.BindFunc("port_3_style", [make_port_style](Rml::Variant& out) { out = make_port_style(3); });
         controls_model_handle = constructor.GetModelHandle();
+        refresh_controller_list();
     }
 
     void make_nav_help_bindings(Rml::Context* context) {

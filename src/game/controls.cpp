@@ -59,6 +59,7 @@ recomp::InputField& recomp::get_input_binding(GameInput input, size_t binding_in
 }
 
 recomp::InputField& recomp::get_input_binding(GameInput input, size_t binding_index, recomp::InputDevice device, int port) {
+    if (port < 0 || port >= recomp::max_ports) port = 0;
     input_mapping_array& device_mappings = (device == recomp::InputDevice::Controller)
         ? controller_input_mappings[port]
         : keyboard_input_mappings[port];
@@ -79,6 +80,7 @@ void recomp::set_input_binding(recomp::GameInput input, size_t binding_index, re
 }
 
 void recomp::set_input_binding(recomp::GameInput input, size_t binding_index, recomp::InputDevice device, recomp::InputField value, int port) {
+    if (port < 0 || port >= recomp::max_ports) port = 0;
     input_mapping_array& device_mappings = (device == recomp::InputDevice::Controller)
         ? controller_input_mappings[port]
         : keyboard_input_mappings[port];
