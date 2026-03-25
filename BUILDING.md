@@ -7,6 +7,12 @@ These steps cover: decompressing the ROM, running the recompiler and finally bui
 ## 1. Building the Bomberman 64 decompilation
 You will need a decompressed ROM. Build the project at https://github.com/Bomberhackers/bm64 which will generate a decompressed ROM from an existing locally dumped BM64 US ROM.
 
+Place the decompressed ROM in the repository root as:
+
+```bash
+bm64.decomp.us.z64
+```
+
 ## 2. Clone the Bomberman 64 Recompiled Repository
 This project makes use of submodules so you will need to clone the repository with the `--recurse-submodules` flag.
 
@@ -26,6 +32,16 @@ For Linux the instructions for Ubuntu are provided, but you can find the equival
 sudo apt-get install cmake ninja libsdl2-dev libgtk-3-dev lld llvm clang-15
 ```
 
+### macOS
+For macOS, install dependencies with Homebrew:
+
+```bash
+brew install cmake ninja sdl2 freetype llvm lld
+python3 -m pip install --user macholib
+```
+
+`macholib` is required by the macOS linker wrapper used by this project.
+
 ### Windows
 You will need to install [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/).
 In the setup process you'll need to select the following options and tools for installation:
@@ -33,7 +49,7 @@ In the setup process you'll need to select the following options and tools for i
 - C++ Clang Compiler for Windows
 - C++ CMake tools for Windows
 
-The other tool necessary will be `make` which can be installe via [Chocolatey](https://chocolatey.org/):
+The other tool necessary will be `make` which can be installed via [Chocolatey](https://chocolatey.org/):
 ```bash
 choco install make
 ```
@@ -58,12 +74,14 @@ If you prefer the command line or you're on a Unix platform you can build the pr
 
 ```bash
 cmake -S . -B build-cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -G Ninja -DCMAKE_BUILD_TYPE=Release # or Debug if you want to debug
-cmake --build build-cmake --target BM64Recompiled -j$(nproc) --config Release # or Debug
+cmake --build build-cmake --target BM64Recompiled --config Release --parallel # or Debug
 ```
 
 ## 6. Success
 
-Voilà! You should now have a `BM64Recompiled` executable in the build directory! If you used Visual Studio this will be `out/build/x64-[Configuration]` and if you used the provided CMake commands then this will be `build-cmake`. You will need to run the executable out of the root folder of this project or copy the assets folder to the build folder to run it.
+Voilà! You should now have a BM64Recompiled executable in the build directory! If you used Visual Studio this will be `out/build/x64-[Configuration]` and if you used the provided CMake commands then this will be `build-cmake`.
 
-> [!IMPORTANT]  
+On macOS, the output is `build-cmake/BM64Recompiled.app`.
+
+> [!IMPORTANT]
 > In the game itself, you should be using a standard ROM, not the decompressed one.
