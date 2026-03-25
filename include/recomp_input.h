@@ -74,6 +74,11 @@ namespace recomp {
     float get_input_analog(const std::span<const recomp::InputField> fields);
     bool get_input_digital(const InputField& field);
     bool get_input_digital(const std::span<const recomp::InputField> fields);
+    // Per-port versions: for controller inputs, read only from the port's assigned gamepad
+    float get_input_analog_port(const InputField& field, int port);
+    float get_input_analog_port(const std::span<const recomp::InputField> fields, int port);
+    bool get_input_digital_port(const InputField& field, int port);
+    bool get_input_digital_port(const std::span<const recomp::InputField> fields, int port);
     void get_gyro_deltas(float* x, float* y);
     void get_mouse_deltas(float* x, float* y);
     void get_right_analog(float* x, float* y);
@@ -83,6 +88,25 @@ namespace recomp {
         Keyboard,
         COUNT
     };
+
+    enum class ControllerPortMode {
+        Off,
+        Keyboard,
+        Controller,
+        OptionCount
+    };
+
+    NLOHMANN_JSON_SERIALIZE_ENUM(recomp::ControllerPortMode, {
+        {recomp::ControllerPortMode::Off, "Off"},
+        {recomp::ControllerPortMode::Keyboard, "Keyboard"},
+        {recomp::ControllerPortMode::Controller, "Controller"}
+    });
+
+    constexpr int max_ports = 4;
+
+    ControllerPortMode get_port_mode(int port);
+    void set_port_mode(int port, ControllerPortMode mode);
+    int get_port_count();
 
     void start_scanning_input(InputDevice device);
     void stop_scanning_input();
@@ -150,6 +174,7 @@ namespace recomp {
 
     extern const DefaultN64Mappings default_n64_keyboard_mappings;
     extern const DefaultN64Mappings default_n64_controller_mappings;
+    const DefaultN64Mappings& get_default_keyboard_mappings_for_port(int port);
 
     constexpr size_t bindings_per_input = 2;
 
@@ -158,7 +183,9 @@ namespace recomp {
     const std::string& get_input_enum_name(GameInput input);
     GameInput get_input_from_enum_name(const std::string_view name);
     InputField& get_input_binding(GameInput input, size_t binding_index, InputDevice device);
+    InputField& get_input_binding(GameInput input, size_t binding_index, InputDevice device, int port);
     void set_input_binding(GameInput input, size_t binding_index, InputDevice device, InputField value);
+    void set_input_binding(GameInput input, size_t binding_index, InputDevice device, InputField value, int port);
 
     bool get_n64_input(int controller_num, uint16_t* buttons_out, float* x_out, float* y_out);
     void set_rumble(int controller_num, bool);
@@ -166,7 +193,11 @@ namespace recomp {
     void handle_events();
 
     ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num);
-    
+    std::string get_port_controller_name(int port);
+    std::vector<std::string> get_connected_controller_names();
+    int get_port_controller_index(int port);
+    void assign_controller_to_port(int port, int controller_index);
+
     // Rumble strength ranges from 0 to 100.
     int get_rumble_strength();
     void set_rumble_strength(int strength);
