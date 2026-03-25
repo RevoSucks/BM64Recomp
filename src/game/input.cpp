@@ -31,6 +31,14 @@ static std::array<std::atomic<recomp::ControllerPortMode>, recomp::max_ports> po
     recomp::ControllerPortMode::Off,
 };
 
+// Per-port pak type state (default to ControllerPak)
+static std::array<std::atomic<recomp::PakType>, recomp::max_ports> port_pak_types = {
+    recomp::PakType::ControllerPak,
+    recomp::PakType::ControllerPak,
+    recomp::PakType::ControllerPak,
+    recomp::PakType::ControllerPak,
+};
+
 recomp::ControllerPortMode recomp::get_port_mode(int port) {
     if (port < 0 || port >= recomp::max_ports) return recomp::ControllerPortMode::Off;
     return port_modes[port].load();
@@ -43,6 +51,16 @@ void recomp::set_port_mode(int port, recomp::ControllerPortMode mode) {
 
 int recomp::get_port_count() {
     return recomp::max_ports;
+}
+
+recomp::PakType recomp::get_port_pak_type(int port) {
+    if (port < 0 || port >= recomp::max_ports) return recomp::PakType::ControllerPak;
+    return port_pak_types[port].load();
+}
+
+void recomp::set_port_pak_type(int port, recomp::PakType type) {
+    if (port < 0 || port >= recomp::max_ports) return;
+    port_pak_types[port].store(type);
 }
 
 static struct {
@@ -639,9 +657,20 @@ void recomp::set_rumble(int controller_num, bool on) {
 ultramodern::input::connected_device_info_t recomp::get_connected_device_info(int controller_num) {
     if (controller_num >= 0 && controller_num < recomp::max_ports) {
         if (port_modes[controller_num].load() != recomp::ControllerPortMode::Off) {
+            ultramodern::input::Pak pak = ultramodern::input::Pak::None;
+            switch (port_pak_types[controller_num].load()) {
+                case recomp::PakType::ControllerPak:
+                    pak = ultramodern::input::Pak::ControllerPak;
+                    break;
+                case recomp::PakType::RumblePak:
+                    pak = ultramodern::input::Pak::RumblePak;
+                    break;
+                default:
+                    break;
+            }
             return ultramodern::input::connected_device_info_t {
                 .connected_device = ultramodern::input::Device::Controller,
-                .connected_pak = ultramodern::input::Pak::RumblePak,
+                .connected_pak = pak,
             };
         }
     }
